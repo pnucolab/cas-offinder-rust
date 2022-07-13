@@ -1,0 +1,17 @@
+pub const CHUNK_SIZE: usize = 1<<16;
+pub const CHUNK_SIZE_BYTES: usize = CHUNK_SIZE/2;
+
+pub struct ChromChunkInfo{
+    pub chr_name: String,
+    // fixed size chunk data
+    pub data: Box<[u8;CHUNK_SIZE_BYTES]>,
+    // start and end of data within chromosome, by nucleotide
+    pub chunk_start: u64,
+    pub chunk_end: u64,
+}
+
+impl ChromChunkInfo{
+    pub fn size(&self)->u64{
+        self.chunk_end - self.chunk_start
+    }
+}

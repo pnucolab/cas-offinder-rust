@@ -46,8 +46,9 @@ const fn invert_chrmap(inarr:[u8;NCHRS])->[u8;NCHRS]{
     let mut arr= [0 as u8;NCHRS];
     let mut i = 0;
     while i < NCHRS{
-        if inarr[i] != 0{
-            arr[inarr[i] as usize] = i as u8;
+        let idx = NCHRS - i - 1;
+        if inarr[idx] != 0{
+            arr[inarr[idx] as usize] = idx as u8;
         }
         i += 1;
     }
@@ -60,7 +61,7 @@ const fn create_2bit_block_map()->[u16;NCHRS]{
         let mut val:u16 = 0;
         let mut j = 0;
         while j < 4{
-            let bit2val = ((i >> ((4 - j - 1) * 2)) & 0x3);
+            let bit2val = (i >> ((4 - j - 1) * 2)) & 0x3;
             val |= (1<<bit2val) << (j*4);
             j += 1;
         }
@@ -89,63 +90,78 @@ const fn invert_double_patternmap(inarr:[u8;NSHRTS])->[u16;NCHRS]{
     let mut arr = [0 as u16; NCHRS];
     let mut i = 0;
     while i < NSHRTS{
-        if inarr[i] != 0{
-            arr[inarr[i]as usize] = i as u16;
+        let idx = NSHRTS - 1 - i;
+        if inarr[idx] != 0{
+            arr[inarr[idx]as usize] = idx as u16;
         }
+        i += 1;
     }
     arr
 }
+
+
+/*
+Precomputed mappings between different data formats
+*/
+
+const STR_2_BIT4: [[u8; NCHRS]; 2] = [
+    apply_lower(makebit4map(false)),
+    apply_lower(makebit4map(true))
+];
+const DSTR_TO_BIT4: [[u8; NSHRTS]; 2] = [
+    doubleup_patternmap(STR_2_BIT4[0]),
+    doubleup_patternmap(STR_2_BIT4[1]),
+];
+
+const BIT4_TO_STR:[u8;NCHRS] = invert_chrmap(STR_2_BIT4[1]);
+const DBIT4_TO_STR: [u16; NCHRS] = invert_double_patternmap(DSTR_TO_BIT4[1]);
+
+const BIT2_TO_BIT4:[u16;256] = create_2bit_block_map();
+
 pub fn bit4_to_string(out_data: &mut[u8], data:&[u8], read_offset: usize, n_chrs: usize){
-    const bit4_map:[u8;NCHRS] = invert_chrmap(makebit4map(false));
+    assert!(out_data.len() >= n_chrs,"out data must be large enough to store result");
     let src = &data[(read_offset/2)..];
     let r_offset = read_offset%2;
     if r_offset != 0 && n_chrs > 0{
-        out_data[0] = bit4_map[((src[0] & 0xf0) >> 4) as usize];
+        out_data[0] = BIT4_TO_STR[((src[0] & 0xf0) >> 4) as usize];
         bit4_to_string(&mut out_data[1..], &src[1..], 0, n_chrs-1);
     }
     else{
+        unsafe{
+        let dout_data_ptr = out_data.as_ptr() as *mut u16;
         for i in 0..n_chrs/2{
-            out_data[i*2] = bit4_map[(src[i]&0x0f) as usize];
-            out_data[i*2+1] = bit4_map[((src[i]&0xf0) >> 4) as usize];
+            *dout_data_ptr.add(i) = DBIT4_TO_STR[*src.get_unchecked(i) as usize];
+        }
         }
         if n_chrs%2 == 1 {
-            out_data[n_chrs-1] = bit4_map[(src[n_chrs/2]&0x0f) as usize];
+            out_data[n_chrs-1] = BIT4_TO_STR[(src[n_chrs/2]&0x0f) as usize];
         }
     }
 
 }
 pub fn string_to_bit4(out_data: &mut[u8], data:&[u8], write_offset: usize, mixed_base: bool){
-    const strmaps: [[u8; NCHRS]; 2] = [
-        apply_lower(makebit4map(false)),
-        apply_lower(makebit4map(true))
-    ];
-    const dblstrmaps: [[u8; NSHRTS]; 2] = [
-        doubleup_patternmap(strmaps[0]),
-        doubleup_patternmap(strmaps[1]),
-    ];
     let n_chrs = data.len();
     let dest = &mut out_data[write_offset/2..];
     if write_offset%2 != 0 && n_chrs > 0{
-        dest[0] |= strmaps[mixed_base as usize][data[0] as usize] << 4;
+        dest[0] |= STR_2_BIT4[mixed_base as usize][data[0] as usize] << 4;
         string_to_bit4(&mut dest[1..], &data[1..], 0, mixed_base);
     }
     else{
         assert!(dest.len() <= cdiv(n_chrs, 2));
         if n_chrs % 2 != 0{
-            dest[n_chrs/2] |= strmaps[mixed_base as usize][data[n_chrs-1] as usize];
+            dest[n_chrs/2] |= STR_2_BIT4[mixed_base as usize][data[n_chrs-1] as usize];
         }
         unsafe{
             let srcptr = data.as_ptr();
             let dsrcptr = srcptr as *const u16;
             for i in 0..(n_chrs/2){
-                *dest.get_unchecked_mut(i) = dblstrmaps[mixed_base as usize][(*(dsrcptr.add(i))) as usize];
+                *dest.get_unchecked_mut(i) = DSTR_TO_BIT4[mixed_base as usize][(*(dsrcptr.add(i))) as usize];
                 // dest[i] = strmaps[mixed_base as usize][data[i*2] as usize] | (strmaps[mixed_base as usize][data[i*2+1] as usize] << 4);
             }
         }
     }
 }
 pub fn bit2_to_bit4(out_data: &mut[u8], data:&[u8], n_chrs: usize){
-    const bit2map:[u16;256] = create_2bit_block_map();
     assert!(n_chrs % 4 == 0, "twobit2bit4 only support block of 4 writes");
     assert!(out_data.as_ptr().align_offset(2) == 0,
            "dest must be alligned to 2 byte boundaries");
@@ -155,23 +171,21 @@ pub fn bit2_to_bit4(out_data: &mut[u8], data:&[u8], n_chrs: usize){
     unsafe{
         let blkdest = out_data.as_mut_ptr() as *mut u16; 
         for i in 0..n_blks{
-            *blkdest.add(i) = bit2map[*data.get_unchecked(i) as usize];
+            *blkdest.add(i) = BIT2_TO_BIT4[*data.get_unchecked(i) as usize];
         }
     }
 }
 pub fn memsetbit4(dest: &mut[u8], bit4val:u8, start:usize, end:usize){
     assert!(bit4val <= 0xf);
-    if (start < end && start % 2 == 1) {
-        dest[start / 2] &= 0xf;
-        dest[start / 2] |= bit4val << 4;
+    if start < end && start % 2 == 1 {
+        dest[start / 2] = (dest[start / 2] & 0xf) | (bit4val << 4);
         memsetbit4(dest, bit4val, start+1, end);
     }
-    else if (start < end && end % 2 == 1) {
-        dest[end / 2] &= 0xf0;
-        dest[end / 2] |= bit4val;
+    else if start < end && end % 2 == 1 {
+        dest[end / 2] = (dest[end / 2] & 0xf0) | bit4val;
         memsetbit4(dest, bit4val, start, end-1);
     }
-    else if (start < end) {
+    else if start < end {
         let bstart = start / 2;
         let bend = end / 2;
         let bval = bit4val | (bit4val << 4);
@@ -187,19 +201,6 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
     
-    pub fn string_to_bit4_fn(data:&[u8], offset: usize, mixed_base:bool)->Vec<u8>{
-        let size = cdiv(data.len() + offset, 2);
-        let mut outarr = vec![0 as u8;size];
-        string_to_bit4(&mut outarr, data, offset, mixed_base);
-        outarr        
-    }
-    
-    pub fn bit4_to_string_fn(data:&[u8], offset: usize, n_chrs: usize)->Vec<u8>{
-        let mut outarr = vec![0 as u8;n_chrs];
-        bit4_to_string(&mut outarr, data, offset, n_chrs);
-        outarr
-    }
-
     #[test]
     fn test_str2bit4() {
         let input_data =  b"ACtGc";
