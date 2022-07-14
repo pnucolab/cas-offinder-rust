@@ -71,41 +71,38 @@ pub fn read_2bit(dest:&Sender<ChromChunkInfo>, fname: &Path)->Result<()>{
         const NUCL_PER_BYTE: usize = 4;
         const RAW_BUF_LEN: usize = CHUNK_SIZE/NUCL_PER_BYTE;
         let mut raw_buf = [0 as u8;RAW_BUF_LEN];
-        let rawlen = cdiv(chrlen, NUCL_PER_BYTE);
         let mut read_pos = 0;
         let mut block_mask_idx: i64 = 0;
 
-        while read_pos < rawlen{
-            let read_size = min(rawlen - read_pos, RAW_BUF_LEN);
-            let cur_data_size = read_size*NUCL_PER_BYTE;
-            reader.read_exact(&mut raw_buf[..read_size])?;
+        while read_pos < chrlen{
+            let read_size = min(chrlen - read_pos, CHUNK_SIZE);
+            reader.read_exact(&mut raw_buf[..cdiv(read_size, NUCL_PER_BYTE)])?;
             let mut chrdata = Box::new([0 as u8; CHUNK_SIZE_BYTES]);
             bit2_to_bit4(&mut chrdata[..],&raw_buf, read_size);
-            memsetbit4(&mut chrdata[..], 0, chrlen - (read_pos+read_size)*NUCL_PER_BYTE, read_size*NUCL_PER_BYTE);
-            let chunk_start = (read_pos*NUCL_PER_BYTE) as u64;
-            let chunk_end = ((read_pos+read_size)*NUCL_PER_BYTE) as u64;
             //go back one in case previous zone overlaps with current block
             block_mask_idx = max(block_mask_idx-1, 0);
-            loop{ 
+            while block_mask_idx < nblocks.len() as i64{ 
                 let (bstart, bsize) = nblocks[block_mask_idx as usize];
-                let block_chunk_start = bstart as i64 - chunk_start as i64;
-                let block_chunk_end = (bstart + bsize) as i64 - chunk_start as i64;
-                if block_chunk_start > cur_data_size as i64{
+                let block_chunk_start = bstart as i64 - read_pos as i64;
+                let block_chunk_end = (bstart + bsize) as i64 - read_pos as i64;
+                if block_chunk_start > read_size as i64{
                     break;
                 }
-                memsetbit4(&mut chrdata[..], 0, max(0,block_chunk_start) as usize, min(max(0,block_chunk_end) as usize, cur_data_size));
+                memsetbit4(&mut chrdata[..], 0, max(0,block_chunk_start) as usize, min(max(0,block_chunk_end) as usize, read_size));
                 block_mask_idx += 1;
             }
-            let chrinfo = ChromChunkInfo{
+            dest.send(ChromChunkInfo{
                 chr_name: chrname.clone(),
-                chunk_start: chunk_start,
-                chunk_end: chunk_end,
+                chunk_start: read_pos as u64,
+                chunk_end: (read_pos+read_size) as u64,
                 data: chrdata,
-            };
-            dest.send(chrinfo)?;
+            })?;
             read_pos += read_size;
         }
     }
-
     Ok(())
 }
+
+/*
+unit tests for this in integration tests.
+*/

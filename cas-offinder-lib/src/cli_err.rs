@@ -4,7 +4,7 @@ use std::string;
 use std::sync::mpsc::SendError;
 
 
-
+#[derive(Debug)]
 pub enum CliError {
     IoError(io::Error),
     BadFileFormat(&'static str),

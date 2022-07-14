@@ -1,10 +1,11 @@
 use std::sync::mpsc::{Sender, };
 use std::fs::read_dir;
+use std::path::Path;
 use crate::chrom_chunk::{ChromChunkInfo, };
 use crate::read_fasta::{read_fasta};
 use crate::cli_err::CliError;
 
-pub fn read_fasta_folder(dest:&Sender<ChromChunkInfo>, folder: &str)->Result<(),CliError>{
+pub fn read_fasta_folder(dest:&Sender<ChromChunkInfo>, folder: &Path)->Result<(),CliError>{
     for path_r in read_dir(folder)?{
         let path = path_r?;
         if path.file_type()?.is_file(){
@@ -17,3 +18,7 @@ pub fn read_fasta_folder(dest:&Sender<ChromChunkInfo>, folder: &str)->Result<(),
     }
     Ok(())
 }
+
+/*
+unit tests for this in integration tests.
+*/

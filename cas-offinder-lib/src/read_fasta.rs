@@ -41,7 +41,7 @@ pub fn read_fasta(dest:&Sender<ChromChunkInfo>, fname: &Path)->Result<(),CliErro
             if cur.chr_name.is_empty(){
                 return Err(CliError::BadFileFormat("> must be followed by chromosome name"));
             }
-            if line.len() as u64 + cur.size() > CHUNK_SIZE as u64{
+            if line.len() + cur.size() > CHUNK_SIZE{
                 let next_cur = ChromChunkInfo{
                     chr_name: cur.chr_name.clone(),
                     chunk_start: cur.chunk_end,
@@ -54,10 +54,17 @@ pub fn read_fasta(dest:&Sender<ChromChunkInfo>, fname: &Path)->Result<(),CliErro
             if line.len() > CHUNK_SIZE{
                 return Err(CliError::BadFileFormat("line in fasta too long"));
             }
-            cur.chunk_end += line.len() as u64;
             let cur_size = cur.size() as usize;
             string_to_bit4(&mut cur.data[..],line.as_bytes(),cur_size, false);
+            cur.chunk_end += line.len() as u64;
         }
+    }
+    if cur.size() > 0{
+        dest.send(cur)?;
     }
     Ok(())
 }
+
+/*
+unit tests for this in integration tests.
+*/

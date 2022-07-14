@@ -11,7 +11,7 @@ pub struct ChromChunkInfo{
 }
 
 impl ChromChunkInfo{
-    pub fn size(&self)->u64{
-        self.chunk_end - self.chunk_start
+    pub fn size(&self)->usize{
+        (self.chunk_end - self.chunk_start) as usize
     }
 }
