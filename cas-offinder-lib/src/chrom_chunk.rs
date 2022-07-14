@@ -15,3 +15,12 @@ impl ChromChunkInfo{
         (self.chunk_end - self.chunk_start) as usize
     }
 }
+pub struct Match{
+    pub chrom_idx: u64,
+    pub pattern_idx: u32,
+    pub mismatches: u32,
+}
+pub struct ChromChunkResult{
+    pub chr_name: String,
+    pub results: Vec<Match>,
+}

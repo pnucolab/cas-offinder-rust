@@ -2,7 +2,7 @@ use std::io::{Read, BufReader};
 use std::fs::File;
 use std::path::Path;
 use std::cmp::{min, max};
-use std::sync::mpsc::{Sender,};
+use std::sync::mpsc::{SyncSender,};
 use crate::cdiv;
 use crate::{bit2_to_bit4,memsetbit4};
 use crate::chrom_chunk::{ChromChunkInfo, CHUNK_SIZE, CHUNK_SIZE_BYTES};
@@ -32,7 +32,7 @@ fn read_intvec(reader: &mut BufReader<std::fs::File>, n_els: usize)->Result<Vec<
     }
     Ok(int_buf)
 }
-pub fn read_2bit(dest:&Sender<ChromChunkInfo>, fname: &Path)->Result<()>{
+pub fn read_2bit(dest:&SyncSender<ChromChunkInfo>, fname: &Path)->Result<()>{
     let file = File::open(fname)?;
     let buf_capacity = CHUNK_SIZE;
     let mut reader = BufReader::with_capacity(buf_capacity,file);

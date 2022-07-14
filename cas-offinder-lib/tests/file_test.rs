@@ -1,17 +1,12 @@
 use cas_offinder_lib::*;
 use std::io::Read;
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{SyncSender, Receiver};
 use std::sync::mpsc;
 use std::fs::File;
 use std::thread;
 use std::path::Path;
 
 
-#[test]
-fn it_adds_one() {
-    assert_eq!(4, cas_offinder_lib::addone(3));
-
-}
 // Note this useful idiom: importing names from outer (for mod tests) scope.
 fn gather_chrom_results(rec:&Receiver<ChromChunkInfo>)->Vec<ChromChunkInfo>{
     let mut res:Vec<ChromChunkInfo> = Vec::new();
@@ -40,7 +35,7 @@ fn get_expected_output()->Vec<u8>{
 #[test]
 fn test_read_2bit() {
     let input_path = Path::new("./tests/test_data/upstream1000.2bit");
-    let (sender, receiver): (Sender<ChromChunkInfo>, Receiver<ChromChunkInfo>) = mpsc::channel();
+    let (sender, receiver): (SyncSender<ChromChunkInfo>, Receiver<ChromChunkInfo>) = mpsc::sync_channel(1);
     thread::spawn(move|| {
         read_2bit(&sender, input_path).unwrap();
     });
@@ -52,7 +47,7 @@ fn test_read_2bit() {
 #[test]
 fn test_read_fasta_folder() {
     let input_path = Path::new("./tests/test_data/");
-    let (sender, receiver): (Sender<ChromChunkInfo>, Receiver<ChromChunkInfo>) = mpsc::channel();
+    let (sender, receiver): (SyncSender<ChromChunkInfo>, Receiver<ChromChunkInfo>) = mpsc::sync_channel(1);
     thread::spawn(move|| {
         read_fasta_folder(&sender, input_path).unwrap();
     });
@@ -66,7 +61,7 @@ fn test_read_fasta_folder() {
 #[test]
 fn test_read_fasta() {
     let input_path = Path::new("./tests/test_data/upstream1000.fa");
-    let (sender, receiver): (Sender<ChromChunkInfo>, Receiver<ChromChunkInfo>) = mpsc::channel();
+    let (sender, receiver): (SyncSender<ChromChunkInfo>, Receiver<ChromChunkInfo>) = mpsc::sync_channel(1);
     thread::spawn(move|| {
         read_fasta(&sender, input_path).unwrap();
     });

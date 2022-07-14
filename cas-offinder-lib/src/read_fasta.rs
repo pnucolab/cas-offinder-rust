@@ -1,4 +1,4 @@
-use std::sync::mpsc::{Sender,};
+use std::sync::mpsc::{SyncSender,};
 use std::fs::File;
 use std::io::{BufReader,BufRead};
 use std::path::Path;
@@ -6,7 +6,7 @@ use crate::string_to_bit4;
 use crate::chrom_chunk::{ChromChunkInfo, CHUNK_SIZE, CHUNK_SIZE_BYTES};
 use crate::cli_err::CliError;
 
-pub fn read_fasta(dest:&Sender<ChromChunkInfo>, fname: &Path)->Result<(),CliError>{
+pub fn read_fasta(dest:&SyncSender<ChromChunkInfo>, fname: &Path)->Result<(),CliError>{
     let file = File::open(fname)?;
     let buf_capacity = CHUNK_SIZE*4;
     let buffer_reader = BufReader::with_capacity(buf_capacity,file);
