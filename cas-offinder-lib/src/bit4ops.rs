@@ -10,6 +10,9 @@ const NSHRTS: usize = 1<<16;
 pub fn cdiv(x:usize, y:usize)->usize{
     (x+y-1)/y
 }
+pub fn roundup(x:usize, y:usize)->usize{
+    cdiv(x,y)*y
+}
 
 const fn makebit4map(mixed_base: bool) -> [u8;NCHRS]{
     let mut arr = [0 as u8;NCHRS];

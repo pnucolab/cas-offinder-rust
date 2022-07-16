@@ -6,7 +6,7 @@ mod read_fasta;
 mod read_2bit;
 mod read_fasta_folder;
 mod cli_err;
-mod opencl_search;
+mod search;
 
 pub use crate::bit4ops::*;
 pub use crate::read_2bit::*;

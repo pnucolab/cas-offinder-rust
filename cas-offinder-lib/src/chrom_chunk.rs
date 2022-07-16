@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 pub const CHUNK_SIZE: usize = 1<<16;
 pub const CHUNK_SIZE_BYTES: usize = CHUNK_SIZE/2;
 
@@ -16,11 +18,8 @@ impl ChromChunkInfo{
     }
 }
 pub struct Match{
+    pub chr_name: Arc<String>,
     pub chrom_idx: u64,
     pub pattern_idx: u32,
     pub mismatches: u32,
-}
-pub struct ChromChunkResult{
-    pub chr_name: String,
-    pub results: Vec<Match>,
 }
