@@ -6,5 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-opencl3 = "0.3.0"
+opencl3 = { path = "../opencl3", version = "0.8.1" }
 crossbeam-channel = "0.5"

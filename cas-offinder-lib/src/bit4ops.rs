@@ -10,6 +10,7 @@ const NSHRTS: usize = 1<<16;
 pub fn cdiv(x:usize, y:usize)->usize{
     (x+y-1)/y
 }
+
 pub fn roundup(x:usize, y:usize)->usize{
     cdiv(x,y)*y
 }

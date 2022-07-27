@@ -7,6 +7,7 @@ mod read_2bit;
 mod read_fasta_folder;
 mod cli_err;
 mod search;
+mod ocl_kernel;
 
 pub use crate::bit4ops::*;
 pub use crate::read_2bit::*;
@@ -14,3 +15,4 @@ pub use crate::read_fasta::*;
 pub use crate::read_fasta_folder::*;
 pub use crate::cli_err::*;
 pub use crate::chrom_chunk::*;
+pub use crate::search::*;

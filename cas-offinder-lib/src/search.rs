@@ -1,13 +1,14 @@
 use opencl3::*;
+// use cl3
 use crate::chrom_chunk::*;
 use crate::bit4ops::{cdiv,roundup};
-use std::ops::Add;
+use std::ptr::{null_mut};
 use std::sync::mpsc;
-use std::thread;
+use std::thread::{self, JoinHandle};
 use crossbeam_channel;
-use std::iter::Peekable;
 use std::sync::Arc;
-use std::slice;
+use crate::ocl_kernel::KERNEL_CONTENTS;
+use opencl3::Result;
 
 
 const SEARCH_CHUNK_SIZE: usize = 1<<22; // must be less than 1<<32
@@ -17,6 +18,8 @@ const CHUNKS_PER_SEARCH:usize = SEARCH_CHUNK_SIZE/CHUNK_SIZE;
 const CPU_BLOCK_SIZE: usize = 8;
 const GPU_BLOCK_SIZE: usize = 4;
 const PATTERN_CHUNK_SIZE:usize = 16;
+const CL_BLOCKS_PER_EXEC: usize = 4;
+
 
 struct SearchChunkMeta{
     pub chr_names: Vec<String>,
@@ -35,18 +38,128 @@ struct SearchChunkResult{
     pub meta: SearchChunkMeta,
 }
 
+#[derive(Clone, Copy)]
 struct SearchMatch{
     pub chunk_idx: u32,
     pub pattern_idx: u32,
     pub mismatches: u32,
 }
-// fn make_patternbuf(){}
 
-fn search_device(recv: &crossbeam_channel::Receiver<SearchChunkInfo>, dest: &mpsc::SyncSender<SearchChunkResult>){
-
+const MAX_QUEUED: usize = 1;
+fn create_ocl_buf<T>(context:&context::Context, size:usize)->Result<memory::Buffer<T>>{
+    memory::Buffer::create(&context, memory::CL_MEM_READ_WRITE, size, null_mut())
 }
-fn search_compute(patterns: &Vec<Vec<u8>>,recv: mpsc::Receiver<SearchChunkInfo>, dest: mpsc::SyncSender<SearchChunkResult>){
+fn create_ocl_bufs<T>(context:&context::Context,size:usize)->Result<[memory::Buffer<T>;MAX_QUEUED]>{
+    Ok([
+        create_ocl_buf::<T>(&context,size)?,
+        // create_ocl_buf::<T>(&context,size)?
+    ])
+}
+fn is_gpu(dev:&device::Device)->Result<bool>{
+    Ok(dev.dev_type()? == device::CL_DEVICE_TYPE_GPU)
+}
+fn prefered_block_size(dev:&device::Device)->Result<usize>{
+    Ok(if is_gpu(dev)? { GPU_BLOCK_SIZE } else { CPU_BLOCK_SIZE })
+}
+// fn get_prog_args(pattern_len:)
+fn search_device_ocl(max_mismatches: u32, pattern_len: usize, patterns: Arc<Vec<u8>>, context: Arc<context::Context>, program: Arc<program::Program>, dev:Arc<device::Device>, recv: crossbeam_channel::Receiver<SearchChunkInfo>, dest: mpsc::SyncSender<SearchChunkResult>)->Result<()>{
+    const OUT_BUF_SIZE: usize = 1<<22; 
+    const CL_BLOCK: u32 = 1;
+    const CL_NO_BLOCK: u32 = 0;
+    let queue = command_queue::CommandQueue::create(&context, dev.id(), 0)?;
+    let kernel = kernel::Kernel::create(&program, "find_matches")?;
+    let mut genome_bufs = create_ocl_bufs::<u8>(&context,SEARCH_CHUNK_SIZE_BYTES)?;
+    let mut out_counts = create_ocl_bufs::<u32>(&context,1)?;
+    let mut out_bufs = create_ocl_bufs::<SearchMatch>(&context,OUT_BUF_SIZE)?;
+    let mut pattern_buf = create_ocl_buf::<u8>(&context, patterns.len())?;
+    queue.enqueue_write_buffer(&mut pattern_buf,CL_BLOCK, 0, &patterns, &[])?;
+    let pattern_blocked_size = roundup(cdiv(pattern_len,2), PATTERN_CHUNK_SIZE);
+    assert!(patterns.len() % pattern_blocked_size == 0);
+    let n_patterns = patterns.len() / pattern_blocked_size;
+    for item in recv.iter(){
+        let n_chunks = std::cmp::min(CHUNKS_PER_SEARCH-1, item.meta.chr_names.len());
+        let n_genome_bytes = n_chunks*CHUNK_SIZE_BYTES;
+        let n_genome_blocks = n_genome_bytes/prefered_block_size(&dev)?;
+        let n_genome_execs = n_genome_blocks / CL_BLOCKS_PER_EXEC;
+        let cur_genome_buf = &mut genome_bufs[0];
+        let cur_size_buf = &mut out_counts[0];
+        let cur_out_buf = &mut out_bufs[0];
+        let write_event = queue.enqueue_write_buffer(cur_genome_buf, CL_NO_BLOCK, 0, &item.data[..n_genome_bytes+CHUNK_SIZE_BYTES], &[])?;
+        let clear_count_event = queue.enqueue_write_buffer(cur_size_buf,CL_NO_BLOCK, 0, &[0], &[])?;
+
+        let kernel_event = kernel::ExecuteKernel::new(&kernel)
+            .set_arg(cur_genome_buf).unwrap()
+            .set_arg(&pattern_buf).unwrap()
+            .set_arg(&max_mismatches).unwrap()
+            .set_arg(cur_out_buf).unwrap()
+            .set_arg(cur_size_buf).unwrap()
+            .set_global_work_sizes(&[n_genome_execs, n_patterns]).unwrap()
+            .set_wait_event(&write_event).unwrap()
+            .set_wait_event(&clear_count_event).unwrap()
+            .enqueue_nd_range(&queue)?;
+        let mut readsize_buf = [0];
+        queue.enqueue_read_buffer(cur_size_buf, CL_BLOCK, 0,&mut readsize_buf, &[kernel_event.get()])?;
+        let readsize = readsize_buf[0];
+        if readsize != 0{
+            let mut outvec: Vec<SearchMatch> = vec![SearchMatch{chunk_idx:0,pattern_idx:0,mismatches:0};readsize as usize];
+            queue.enqueue_read_buffer(cur_out_buf, CL_BLOCK, 0, &mut outvec[..], &[])?;
+            dest.send(SearchChunkResult{
+                matches: outvec,
+                meta: item.meta,
+            }).unwrap();
+        }
+    }
+    Ok(())
+}
+fn prefered_block_type(dev:&device::Device)->Result<&str>{
+    Ok(if is_gpu(dev)? { "uint32_t" } else { "uint64_t" })
+}
+fn get_compile_defs(pattern_len:usize, block_ty:&str)->String{
+    format!(" -DPATTERN_LEN={}
+     -DBLOCKS_PER_EXEC={}
+     -DPATTERN_CHUNK_SIZE={}
+     -Dblock_ty={}",
+    pattern_len,
+    CL_BLOCKS_PER_EXEC,
+    PATTERN_CHUNK_SIZE,
+    block_ty
+)
+}
+fn search_chunk_ocl(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,recv: crossbeam_channel::Receiver<SearchChunkInfo>, dest: mpsc::SyncSender<SearchChunkResult>)->Result<()>{
     /* divies off work to opencl devices */
+    let pattern_arc = Arc::new(pack_patterns(patterns));
+    // let devices = get_all_devices()?;
+    // assert!(devices.len()>0, "Needs at least one opencl device to run tests!");
+    let platforms = platform::get_platforms()?;
+    if true || platforms.len() == 0{
+        search_compute_cpu(max_mismatches, pattern_len, patterns, recv, dest);
+        return Ok(());
+    }
+    let mut threads:Vec<JoinHandle<Result<()>>> = Vec::new();
+    for plat in platforms.iter(){
+        let plat_devs = plat.get_devices(device::CL_DEVICE_TYPE_ALL)?;
+        if plat_devs.len() > 0{
+            let context = Arc::new(context::Context::from_devices(&plat_devs, &[0], None, null_mut())?);
+            let p_devices:Vec<Arc<device::Device>> = plat_devs.iter().map(|d|Arc::new(device::Device::new(*d))).collect();
+            let prog_options = get_compile_defs(pattern_len, prefered_block_type(&p_devices[0])?);
+            let program = Arc::new(program::Program::create_and_build_from_source(&context, KERNEL_CONTENTS, &prog_options).map_err(|err|{println!("{}",err);}).unwrap());
+            
+            for p_dev in p_devices{
+                let t_dest = dest.clone();
+                let t_recv = recv.clone();
+                let t_context = context.clone();
+                let t_prog = program.clone();
+                let t_pattern = pattern_arc.clone();
+                threads.push(thread::spawn(move||{
+                    search_device_ocl(max_mismatches, pattern_len, t_pattern, t_context, t_prog, p_dev, t_recv, t_dest)
+                }));
+            } 
+        }
+    }
+    for t in threads{
+        t.join().unwrap()?;
+    }
+    Ok(())
 }
 fn checked_div(x:usize, y:usize)->usize{
     assert!(x % y == 0);
@@ -169,8 +282,11 @@ fn chunks_to_searchchunk(chunk_buf:&Vec<ChromChunkInfo>)->SearchChunkInfo
         }
     }
 }
-fn get_match_key(x:&SearchMatch)->u32{x.chunk_idx}
 fn convert_matches(pattern_len:usize, search_res: SearchChunkResult)->Vec<Match>{
+    let n_blocks = search_res.meta.chr_names.len();
+    assert!(n_blocks == search_res.meta.chunk_ends.len());
+    assert!(n_blocks == search_res.meta.chunk_starts.len());
+    assert!(n_blocks == search_res.meta.chr_names.len());
     let chr_names:Vec<Arc<String>> = search_res.meta.chr_names.iter().map(|name|Arc::new(name.clone())).collect();
     let mut results:Vec<Match> = Vec::new();
     for smatch in search_res.matches.iter(){
@@ -215,7 +331,7 @@ pub fn search(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,r
                         buf.push(last_el);
                     }
                 }
-                Err(e)=>{
+                Err(_err)=>{
                     break;
                 }
             }
@@ -229,7 +345,10 @@ pub fn search(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,r
             dest.send(convert_matches(pattern_len,search_chunk)).unwrap();
         }
     });        
-    search_compute_cpu(max_mismatches, pattern_len, patterns,compute_recv_src, compute_send_dest);
+    match search_chunk_ocl(max_mismatches, pattern_len, patterns,compute_recv_src, compute_send_dest){
+        Ok(_)=>{},
+        Err(err_int)=>{panic!("{}",err_int.to_string())}
+    };
     send_thread.join().unwrap();
     recv_thread.join().unwrap();
 }
@@ -238,12 +357,10 @@ pub fn search(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,r
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use crate::string_to_bit4;
     use crate::read_2bit;
     use std::path::Path;
 
-    use crate::CHUNK_SIZE_BYTES;
 
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
@@ -261,8 +378,8 @@ mod tests {
         let (dest_sender, dest_receiver): (mpsc::SyncSender<Vec<Match>>, mpsc::Receiver<Vec<Match>>) = mpsc::sync_channel(4);
         const NUM_ITERS:usize = 2;
         let send_thread = thread::spawn(move|| {
-            for i in 0..NUM_ITERS{
-                read_2bit(&src_sender, Path::new("tests/test_data/upstream1000.2bit"));
+            for _ in 0..NUM_ITERS{
+                read_2bit(&src_sender, Path::new("tests/test_data/upstream1000.2bit")).unwrap();
             }
             // for i in 0..NUM_ITERS{
             //     src_sender.send(ChromChunkInfo{
