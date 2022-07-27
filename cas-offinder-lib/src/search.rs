@@ -7,9 +7,9 @@ use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use crossbeam_channel;
 use std::sync::Arc;
-use crate::ocl_kernel::KERNEL_CONTENTS;
 use opencl3::Result;
 
+pub const KERNEL_CONTENTS:&str = include_str!("./kernel.cl");
 
 const SEARCH_CHUNK_SIZE: usize = 1<<22; // must be less than 1<<32
 const SEARCH_CHUNK_SIZE_BYTES: usize = SEARCH_CHUNK_SIZE/2;
@@ -88,14 +88,14 @@ fn search_device_ocl(max_mismatches: u32, pattern_len: usize, patterns: Arc<Vec<
         let clear_count_event = queue.enqueue_write_buffer(cur_size_buf,CL_NO_BLOCK, 0, &[0], &[])?;
 
         let kernel_event = kernel::ExecuteKernel::new(&kernel)
-            .set_arg(cur_genome_buf).unwrap()
-            .set_arg(&pattern_buf).unwrap()
-            .set_arg(&max_mismatches).unwrap()
-            .set_arg(cur_out_buf).unwrap()
-            .set_arg(cur_size_buf).unwrap()
-            .set_global_work_sizes(&[n_genome_execs, n_patterns]).unwrap()
-            .set_wait_event(&write_event).unwrap()
-            .set_wait_event(&clear_count_event).unwrap()
+            .set_arg(cur_genome_buf)
+            .set_arg(&pattern_buf)
+            .set_arg(&max_mismatches)
+            .set_arg(cur_out_buf)
+            .set_arg(cur_size_buf)
+            .set_global_work_sizes(&[n_genome_execs, n_patterns])
+            .set_wait_event(&write_event)
+            .set_wait_event(&clear_count_event)
             .enqueue_nd_range(&queue)?;
         let mut readsize_buf = [0];
         queue.enqueue_read_buffer(cur_size_buf, CL_BLOCK, 0,&mut readsize_buf, &[kernel_event.get()])?;
@@ -131,7 +131,7 @@ fn search_chunk_ocl(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<
     // let devices = get_all_devices()?;
     // assert!(devices.len()>0, "Needs at least one opencl device to run tests!");
     let platforms = platform::get_platforms()?;
-    if true || platforms.len() == 0{
+    if platforms.len() == 0{
         search_compute_cpu(max_mismatches, pattern_len, patterns, recv, dest);
         return Ok(());
     }
