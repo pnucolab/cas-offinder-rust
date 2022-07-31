@@ -199,6 +199,35 @@ pub fn memsetbit4(dest: &mut[u8], bit4val:u8, start:usize, end:usize){
         }
     }
 }
+pub fn is_mixedbase(c:u8)->bool{
+    STR_2_BIT4[true as usize][c as usize] != 0
+}
+pub fn is_mixedbase_str(chars:&[u8])->bool{
+    chars.iter().copied().map(is_mixedbase).all(|x|x)
+}
+fn complimentb4(v:u8)->u8{
+    // only operates on the first 4 bits
+    ((v << 2) | (v >> 2)) & 0xf
+}
+fn compliment_char(c:u8)->u8{
+    let b4 = STR_2_BIT4[true as usize][c as usize];
+    let rev_bit4 = complimentb4(b4);
+    let rev_char = if b4 != 0 {BIT4_TO_STR[rev_bit4 as usize]} else {c};
+    //use original capitalization
+    let fixcaps = rev_char | (c & !0xdf);
+    fixcaps
+}
+pub fn reverse_compliment_char_i(out_data: &mut[u8]){
+    for c in out_data.iter_mut(){
+        *c = compliment_char(*c);
+    }
+    out_data.reverse();
+}
+pub fn reverse_compliment_char(out_data: &[u8])->Vec<u8>{
+    let mut res:Vec<u8> = out_data.to_vec();
+    reverse_compliment_char_i(&mut res);
+    res
+}
 
 
 #[cfg(test)]
@@ -267,9 +296,9 @@ mod tests {
         assert_eq!(actual_out, expected_out);
     }
     #[test]
-    fn test_bit42str() {
-        let input = [0x24, 0x81, 0x02];
-        let expected_out = b"ACTGC";
+    fn test_bit42str_mixbase() {
+        let input = [0x24, 0xc1, 0x0f];
+        let expected_out = b"ACTRN";
         let out_size = expected_out.len();
         let mut actual_out = vec![0 as u8;out_size];
         let read_offset = 0;
@@ -327,5 +356,26 @@ mod tests {
         let mut result = vec![0 as u8;expected.len()];
         bit2_to_bit4(&mut result, &input, input.len()*4);
         assert_eq!(result, expected);
+    }
+    #[test]
+    fn test_reverse_compliment_char() {
+        let input = b"AGRVN";
+        let expected_out = b"NBYCT";
+        assert_eq!(expected_out, &reverse_compliment_char(input)[..]);
+        assert_eq!(input, &reverse_compliment_char(expected_out)[..]);
+    }
+    #[test]
+    fn test_reverse_compliment_char_simple() {
+        let input = b"NC";
+        let expected_out = b"GN";
+        assert_eq!(expected_out, &reverse_compliment_char(input)[..]);
+        assert_eq!(input, &reverse_compliment_char(expected_out)[..]);
+    }
+    #[test]
+    fn test_is_mixedbase() {
+        let input = b"ACbyNnz3?T";
+        let expected_out = [true,true,true,true,true,true,false,false,false,true];
+        let actual_out = input.map(is_mixedbase);
+        assert_eq!(expected_out, actual_out);
     }
 }

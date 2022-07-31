@@ -10,7 +10,8 @@ pub enum CliError {
     BadFileFormat(&'static str),
     ParseIntError(num::ParseIntError),
     FromUtf8Error(string::FromUtf8Error),
-    SendError(String)
+    SendError(String),
+    ArgumentError(&'static str),
 }
 pub type Result<T> = std::result::Result<T, CliError>;
 

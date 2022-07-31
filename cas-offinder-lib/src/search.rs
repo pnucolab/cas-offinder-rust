@@ -1,4 +1,5 @@
 use opencl3::*;
+use opencl3::types::cl_uint;
 // use cl3
 use crate::chrom_chunk::*;
 use crate::bit4ops::{cdiv,roundup};
@@ -8,6 +9,7 @@ use std::thread::{self, JoinHandle};
 use crossbeam_channel;
 use std::sync::Arc;
 use opencl3::Result;
+use crate::run_config::*;
 
 pub const KERNEL_CONTENTS:&str = include_str!("./kernel.cl");
 
@@ -125,19 +127,14 @@ fn get_compile_defs(pattern_len:usize, block_ty:&str)->String{
     block_ty
 )
 }
-fn search_chunk_ocl(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,recv: crossbeam_channel::Receiver<SearchChunkInfo>, dest: mpsc::SyncSender<SearchChunkResult>)->Result<()>{
+fn search_chunk_ocl(devices: OclRunConfig, max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,recv: crossbeam_channel::Receiver<SearchChunkInfo>, dest: mpsc::SyncSender<SearchChunkResult>)->Result<()>{
     /* divies off work to opencl devices */
     let pattern_arc = Arc::new(pack_patterns(patterns));
     // let devices = get_all_devices()?;
     // assert!(devices.len()>0, "Needs at least one opencl device to run tests!");
-    let platforms = platform::get_platforms()?;
-    if platforms.len() == 0{
-        search_compute_cpu(max_mismatches, pattern_len, patterns, recv, dest);
-        return Ok(());
-    }
     let mut threads:Vec<JoinHandle<Result<()>>> = Vec::new();
-    for plat in platforms.iter(){
-        let plat_devs = plat.get_devices(device::CL_DEVICE_TYPE_ALL)?;
+    for (plat, devs) in devices.get().iter(){
+        let plat_devs:Vec<*mut std::ffi::c_void> = devs.iter().map(|d|d.id()).collect();
         if plat_devs.len() > 0{
             let context = Arc::new(context::Context::from_devices(&plat_devs, &[0], None, null_mut())?);
             let p_devices:Vec<Arc<device::Device>> = plat_devs.iter().map(|d|Arc::new(device::Device::new(*d))).collect();
@@ -155,6 +152,7 @@ fn search_chunk_ocl(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<
                 }));
             } 
         }
+
     }
     for t in threads{
         t.join().unwrap()?;
@@ -309,7 +307,7 @@ fn convert_matches(pattern_len:usize, search_res: SearchChunkResult)->Vec<Match>
     results
 }
 
-pub fn search(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,recv: mpsc::Receiver<ChromChunkInfo>, dest: mpsc::SyncSender<Vec<Match>>){
+pub fn search(devices: OclRunConfig, max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,recv: mpsc::Receiver<ChromChunkInfo>, dest: mpsc::SyncSender<Vec<Match>>){
     /* public facing function, sends and receives data chunk by chunk */
     assert!(patterns.len() > 0);
     assert!(patterns[0].len()*2 >= pattern_len);
@@ -345,10 +343,15 @@ pub fn search(max_mismatches: u32, pattern_len: usize, patterns: &Vec<Vec<u8>>,r
             dest.send(convert_matches(pattern_len,search_chunk)).unwrap();
         }
     });        
-    match search_chunk_ocl(max_mismatches, pattern_len, patterns,compute_recv_src, compute_send_dest){
-        Ok(_)=>{},
-        Err(err_int)=>{panic!("{}",err_int.to_string())}
-    };
+    if devices.is_empty(){
+        search_compute_cpu(max_mismatches, pattern_len, patterns, compute_recv_src, compute_send_dest);
+    }
+    else{
+        match search_chunk_ocl(devices, max_mismatches, pattern_len, patterns,compute_recv_src, compute_send_dest){
+            Ok(_)=>{},
+            Err(err_int)=>{panic!("{}",err_int.to_string())}
+        };
+    }
     send_thread.join().unwrap();
     recv_thread.join().unwrap();
 }
@@ -421,7 +424,7 @@ mod tests {
         let expected_results_per_file = 117;
         let expected_results = expected_results_per_file * NUM_ITERS;
         let pattern_len = pattern2.len();
-        search(max_mismatches, pattern_len, &patterns,src_receiver, dest_sender);
+        search(OclRunConfig::new(OclDeviceType::CPU).unwrap(), max_mismatches, pattern_len, &patterns,src_receiver, dest_sender);
         send_thread.join().unwrap();
         assert_eq!(result_count.join().unwrap(), expected_results);
     }
