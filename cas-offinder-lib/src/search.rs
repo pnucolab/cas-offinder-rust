@@ -1,5 +1,4 @@
 use opencl3::*;
-use opencl3::types::cl_uint;
 // use cl3
 use crate::chrom_chunk::*;
 use crate::bit4ops::{cdiv,roundup};
@@ -133,7 +132,7 @@ fn search_chunk_ocl(devices: OclRunConfig, max_mismatches: u32, pattern_len: usi
     // let devices = get_all_devices()?;
     // assert!(devices.len()>0, "Needs at least one opencl device to run tests!");
     let mut threads:Vec<JoinHandle<Result<()>>> = Vec::new();
-    for (plat, devs) in devices.get().iter(){
+    for (_, devs) in devices.get().iter(){
         let plat_devs:Vec<*mut std::ffi::c_void> = devs.iter().map(|d|d.id()).collect();
         if plat_devs.len() > 0{
             let context = Arc::new(context::Context::from_devices(&plat_devs, &[0], None, null_mut())?);

@@ -8,10 +8,10 @@ pub enum OclDeviceType { CPU, GPU, ACCEL, ALL }
 
 fn to_system_type(ty: OclDeviceType)->u64{
     match ty{
-        CPU=>device::CL_DEVICE_TYPE_CPU,
-        GPU=>device::CL_DEVICE_TYPE_GPU,
-        ACCEL=>device::CL_DEVICE_TYPE_ACCELERATOR,
-        ALL=>device::CL_DEVICE_TYPE_ALL,
+        OclDeviceType::CPU=>device::CL_DEVICE_TYPE_CPU,
+        OclDeviceType::GPU=>device::CL_DEVICE_TYPE_GPU,
+        OclDeviceType::ACCEL=>device::CL_DEVICE_TYPE_ACCELERATOR,
+        OclDeviceType::ALL=>device::CL_DEVICE_TYPE_ALL,
     }
 }
 

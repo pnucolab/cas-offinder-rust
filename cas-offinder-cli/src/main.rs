@@ -4,6 +4,7 @@ use cas_offinder_lib::*;
 use std::path::Path;
 use std::thread;
 use std::env;
+use std::time::Instant;
 use std::sync::mpsc;
 use crate::cli_utils::SearchRunInfo;
 use crate::cli_utils::parse_and_validate_args;
@@ -49,11 +50,15 @@ fn get_usage_with_devices()->String{
 }
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if args.len() < 2{
+        println!("{}",get_usage_with_devices());
+        return;
+    }
+    let start_time = Instant::now();
     let run_info:SearchRunInfo = parse_and_validate_args(&args).unwrap();
     
     let (src_sender, src_receiver): (mpsc::SyncSender<ChromChunkInfo>, mpsc::Receiver<ChromChunkInfo>) = mpsc::sync_channel(4);
     let (dest_sender, dest_receiver): (mpsc::SyncSender<Vec<Match>>, mpsc::Receiver<Vec<Match>>) = mpsc::sync_channel(4);
-    const NUM_ITERS:usize = 2;
     let send_thread = thread::spawn(move|| {
         read_2bit(&src_sender, &Path::new(&run_info.genome_path)).unwrap();
     });
@@ -83,8 +88,9 @@ fn main() {
     search(run_config,run_info.max_mismatches, run_info.pattern_len, &all_patterns_4bit,src_receiver, dest_sender);
     send_thread.join().unwrap();
     let out = result_count.join().unwrap();
-
+    let tot_time = start_time.elapsed();
     println!("{}",out);
+    println!("Took {}s",tot_time.as_secs_f64());
     // assert_eq!(result_count.join().unwrap(), expected_results);
 }
 

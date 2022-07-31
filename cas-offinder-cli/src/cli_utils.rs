@@ -37,13 +37,12 @@ fn parse_and_validate_input(in_path:&Path)->Result<InFileInfo>{
     let file = File::open(in_path)?;
     let file_too_short_err = "Input file must contain at least 3 lines";
     let mixed_base_error = CliError::ArgumentError("Pattern in input file needs to be a mixed base string");
-    let patterns_same_len_err = CliError::ArgumentError("All patters in input file must be same length");
 
     let reader = BufReader::new(file);
     let mut line_iter = reader.lines();
     let genome_line = line_iter.next().ok_or(CliError::ArgumentError(file_too_short_err))??;
     let searcher_line = line_iter.next().ok_or(CliError::ArgumentError(file_too_short_err))??;
-    let search_buf = searcher_line.into_bytes();
+    let search_buf = searcher_line.trim_end().as_bytes().to_vec();
     if !is_mixedbase_str(&search_buf){
         return Err(mixed_base_error);
     }
@@ -78,11 +77,10 @@ fn parse_and_validate_input(in_path:&Path)->Result<InFileInfo>{
             lineparts[0]
         };
 
-        let byte_pattern = line.as_bytes().to_vec();
-        if byte_pattern.len() != pattern_len{
-            return Err(patterns_same_len_err);
+        if pattern_buf.len() != pattern_len{
+            return Err(CliError::ArgumentError("All patters in input file must be same length"));
         }
-        patterns.push(byte_pattern);
+        patterns.push(pattern_buf);
         pattern_infos.push(cur_info.to_string());
     }
     match mismatches_opt{
