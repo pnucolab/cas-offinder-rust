@@ -1,6 +1,6 @@
 use opencl3::*;
 // use cl3
-use crate::chrom_chunk::*;
+use crate::{chrom_chunk::*, bit4_to_string, reverse_compliment_char_i};
 use crate::bit4ops::{cdiv,roundup};
 use std::ptr::{null_mut};
 use std::sync::mpsc;
@@ -37,6 +37,7 @@ struct SearchChunkInfo{
 struct SearchChunkResult{
     pub matches: Vec<SearchMatch>,
     pub meta: SearchChunkMeta,
+    pub data: Box<[u8;SEARCH_CHUNK_SIZE_BYTES]>,
 }
 
 #[derive(Clone, Copy)]
@@ -107,6 +108,7 @@ fn search_device_ocl(max_mismatches: u32, pattern_len: usize, patterns: Arc<Vec<
             dest.send(SearchChunkResult{
                 matches: outvec,
                 meta: item.meta,
+                data: item.data,
             }).unwrap();
         }
     }
@@ -236,6 +238,7 @@ fn search_device_cpu_thread(max_mismatches: u32, pattern_len: usize, packed_patt
         dest.send(SearchChunkResult{
             matches:search_chunk_cpu(max_mismatches, pattern_len, &packed_patterns,&schunk.data),
             meta:schunk.meta,
+            data:schunk.data,
         }).unwrap();
     }
 }
@@ -279,12 +282,11 @@ fn chunks_to_searchchunk(chunk_buf:&Vec<ChromChunkInfo>)->SearchChunkInfo
         }
     }
 }
-fn convert_matches(pattern_len:usize, search_res: SearchChunkResult)->Vec<Match>{
+fn convert_matches(pattern_len:usize, patterns: &Vec<Vec<u8>>, search_res: SearchChunkResult)->Vec<Match>{
     let n_blocks = search_res.meta.chr_names.len();
     assert!(n_blocks == search_res.meta.chunk_ends.len());
     assert!(n_blocks == search_res.meta.chunk_starts.len());
     assert!(n_blocks == search_res.meta.chr_names.len());
-    let chr_names:Vec<Arc<String>> = search_res.meta.chr_names.iter().map(|name|Arc::new(name.clone())).collect();
     let mut results:Vec<Match> = Vec::new();
     for smatch in search_res.matches.iter(){
         let idx = smatch.chunk_idx as usize / CHUNK_SIZE;
@@ -292,14 +294,26 @@ fn convert_matches(pattern_len:usize, search_res: SearchChunkResult)->Vec<Match>
         let pos = search_res.meta.chunk_starts[idx] + offset as u64;
         //skip anything in the last chunk, it will be repeated again in the next search item
         let is_last_chunk = idx == CHUNKS_PER_SEARCH-1;
-        let is_end_chrom = idx == chr_names.len()-1 || search_res.meta.chunk_starts[idx+1] == 0;
+        let is_end_chrom = idx == search_res.meta.chr_names.len()-1 || search_res.meta.chunk_starts[idx+1] == 0;
         let is_past_end = pos + pattern_len as u64 > search_res.meta.chunk_ends[idx];
         if !is_last_chunk && !(is_end_chrom && is_past_end){
+            let is_forward = smatch.pattern_idx as usize > patterns.len() / 2;
+            let mut dna_result:Vec<u8> = vec![0 as u8; pattern_len];
+            let mut rna_result:Vec<u8> = vec![0 as u8; pattern_len];
+            bit4_to_string(&mut dna_result, &search_res.data[..], offset, pattern_len);
+            bit4_to_string(&mut rna_result, &patterns[smatch.pattern_idx as usize][..], 0, pattern_len);
+            if is_forward{
+                reverse_compliment_char_i(&mut dna_result);
+                reverse_compliment_char_i(&mut rna_result);
+            }
             results.push(Match{
-                chr_name: chr_names[idx].clone(),
+                chr_name: search_res.meta.chr_names[idx].clone(),
                 chrom_idx: pos,
                 pattern_idx: smatch.pattern_idx,
                 mismatches: smatch.mismatches,
+                is_forward: is_forward,
+                dna_seq: dna_result,
+                rna_seq: rna_result,
             });
         }
     }
@@ -337,9 +351,10 @@ pub fn search(devices: OclRunConfig, max_mismatches: u32, pattern_len: usize, pa
             compute_send_src.send(chunks_to_searchchunk(&buf)).unwrap();
         }
     }).unwrap();
+    let patern_clone = patterns.clone();
     let recv_thread = thread::spawn(move|| {
         for search_chunk in compute_recv_dest.iter(){
-            dest.send(convert_matches(pattern_len,search_chunk)).unwrap();
+            dest.send(convert_matches(pattern_len, &patern_clone, search_chunk)).unwrap();
         }
     });        
     if devices.is_empty(){

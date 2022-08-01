@@ -1,10 +1,13 @@
 mod cli_utils;
 
 use cas_offinder_lib::*;
+use std::io::Write;
+use std::io::BufWriter;
 use std::path::Path;
 use std::thread;
 use std::env;
 use std::time::Instant;
+use std::fs::File;
 use std::sync::mpsc;
 use crate::cli_utils::SearchRunInfo;
 use crate::cli_utils::parse_and_validate_args;
@@ -56,18 +59,25 @@ fn main() {
     }
     let start_time = Instant::now();
     let run_info:SearchRunInfo = parse_and_validate_args(&args).unwrap();
-    
+    let mut out_file = File::create(run_info.out_path).unwrap();
+    let mut out_buf_writer = BufWriter::new(out_file);
+
     let (src_sender, src_receiver): (mpsc::SyncSender<ChromChunkInfo>, mpsc::Receiver<ChromChunkInfo>) = mpsc::sync_channel(4);
     let (dest_sender, dest_receiver): (mpsc::SyncSender<Vec<Match>>, mpsc::Receiver<Vec<Match>>) = mpsc::sync_channel(4);
     let send_thread = thread::spawn(move|| {
         read_2bit(&src_sender, &Path::new(&run_info.genome_path)).unwrap();
     });
     let result_count = thread::spawn(move|| {
-        let mut count:usize = 0;
         for chunk in dest_receiver.iter(){
-            count += chunk.len();
+            for m in chunk{
+                let dir = if m.is_forward { '+'} else {'-'};
+                let rna_str = std::str::from_utf8(&&m.rna_seq).unwrap();
+                let dna_str = std::str::from_utf8(&&m.rna_seq).unwrap();
+                out_buf_writer.write_all(
+                    format!("{}\t{}\t{}\t{}\t{}\t{}\n",rna_str, m.chr_name, m.chrom_idx, dna_str, dir, m.mismatches).as_bytes()
+                ).unwrap();
+            }
         }
-        count
     });
     
     let run_config = match OclRunConfig::new(run_info.dev_ty){
@@ -87,9 +97,8 @@ fn main() {
     
     search(run_config,run_info.max_mismatches, run_info.pattern_len, &all_patterns_4bit,src_receiver, dest_sender);
     send_thread.join().unwrap();
-    let out = result_count.join().unwrap();
+    result_count.join().unwrap();
     let tot_time = start_time.elapsed();
-    println!("{}",out);
     println!("Took {}s",tot_time.as_secs_f64());
     // assert_eq!(result_count.join().unwrap(), expected_results);
 }
