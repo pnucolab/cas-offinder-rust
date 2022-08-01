@@ -1,7 +1,6 @@
 use cas_offinder_lib::*;
-use std::path::Path;
 use std::fs::File;
-use std::io::{BufReader, BufRead};
+use std::io::{BufReader, BufRead, Read};
 fn get_dev_ty(arg:&str)->Result<OclDeviceType>{
     let dev_parse_err = CliError::ArgumentError("2nd argument must be one of {{C|G|A}}");
     if arg.len() != 1 {
@@ -33,8 +32,12 @@ struct InFileInfo{
     pattern_len: usize,
     max_mismatches: u32,
 }
-fn parse_and_validate_input(in_path:&Path)->Result<InFileInfo>{
-    let file = File::open(in_path)?;
+fn parse_and_validate_input(in_path:&String)->Result<InFileInfo>{
+    let file = if in_path != "-" { 
+        Box::new(File::open(in_path)?) as Box<dyn Read>
+    } else {
+        Box::new(std::io::stdin()) as Box<dyn Read>
+    };
     let file_too_short_err = "Input file must contain at least 3 lines";
     let mixed_base_error = CliError::ArgumentError("Pattern in input file needs to be a mixed base string");
 
@@ -103,7 +106,7 @@ pub fn parse_and_validate_args(args:&Vec<String>)->Result<SearchRunInfo>{
     let in_filename = &args[1];
     let device_ty_str = &args[2];
     let out_filename = &args[3];
-    let parsed_in_file = parse_and_validate_input(Path::new(in_filename))?;
+    let parsed_in_file = parse_and_validate_input(in_filename)?;
     Ok(SearchRunInfo{
         genome_path: parsed_in_file.genome_path,
         search_filter: parsed_in_file.search_filter,

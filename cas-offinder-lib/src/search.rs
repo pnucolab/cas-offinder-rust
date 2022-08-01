@@ -140,7 +140,7 @@ fn search_chunk_ocl(devices: OclRunConfig, max_mismatches: u32, pattern_len: usi
             let context = Arc::new(context::Context::from_devices(&plat_devs, &[0], None, null_mut())?);
             let p_devices:Vec<Arc<device::Device>> = plat_devs.iter().map(|d|Arc::new(device::Device::new(*d))).collect();
             let prog_options = get_compile_defs(pattern_len, prefered_block_type(&p_devices[0])?);
-            let program = Arc::new(program::Program::create_and_build_from_source(&context, KERNEL_CONTENTS, &prog_options).map_err(|err|{println!("{}",err);}).unwrap());
+            let program = Arc::new(program::Program::create_and_build_from_source(&context, KERNEL_CONTENTS, &prog_options).map_err(|err|{eprintln!("{}",err);}).unwrap());
             
             for p_dev in p_devices{
                 let t_dest = dest.clone();
@@ -219,7 +219,6 @@ fn search_chunk_cpu(max_mismatches: u32, pattern_len: usize, packed_patterns:&[u
             shifted_data[pattern_blocks+BLOCKS_PER_EXEC-1] >>= 4;
         }
     }
-    println!("{}",matches.len());
     matches
 }
 
@@ -297,12 +296,12 @@ fn convert_matches(pattern_len:usize, patterns: &Vec<Vec<u8>>, search_res: Searc
         let is_end_chrom = idx == search_res.meta.chr_names.len()-1 || search_res.meta.chunk_starts[idx+1] == 0;
         let is_past_end = pos + pattern_len as u64 > search_res.meta.chunk_ends[idx];
         if !is_last_chunk && !(is_end_chrom && is_past_end){
-            let is_forward = smatch.pattern_idx as usize > patterns.len() / 2;
+            let is_forward = (smatch.pattern_idx as usize) < patterns.len() / 2;
             let mut dna_result:Vec<u8> = vec![0 as u8; pattern_len];
             let mut rna_result:Vec<u8> = vec![0 as u8; pattern_len];
-            bit4_to_string(&mut dna_result, &search_res.data[..], offset, pattern_len);
+            bit4_to_string(&mut dna_result, &search_res.data[..], smatch.chunk_idx as usize, pattern_len);
             bit4_to_string(&mut rna_result, &patterns[smatch.pattern_idx as usize][..], 0, pattern_len);
-            if is_forward{
+            if !is_forward{
                 reverse_compliment_char_i(&mut dna_result);
                 reverse_compliment_char_i(&mut rna_result);
             }
@@ -398,14 +397,6 @@ mod tests {
             for _ in 0..NUM_ITERS{
                 read_2bit(&src_sender, Path::new("tests/test_data/upstream1000.2bit")).unwrap();
             }
-            // for i in 0..NUM_ITERS{
-            //     src_sender.send(ChromChunkInfo{
-            //         chr_name: String::from_str("chr").unwrap(),
-            //         data: Box::new([1 as u8; CHUNK_SIZE_BYTES]),
-            //         chunk_start: 0,
-            //         chunk_end: CHUNK_SIZE as u64,
-            //     }).unwrap();
-            // }
         });        
         let result_count = thread::spawn(move|| {
             let mut count:usize = 0;

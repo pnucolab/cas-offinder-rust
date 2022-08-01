@@ -228,6 +228,11 @@ pub fn reverse_compliment_char(out_data: &[u8])->Vec<u8>{
     reverse_compliment_char_i(&mut res);
     res
 }
+pub fn cmp_chars(dna:u8, rna: u8)->bool{
+    let dnab = STR_2_BIT4[false as usize][dna as usize];
+    let rnab = STR_2_BIT4[true as usize][rna as usize];
+    (dnab & rnab) != 0
+}
 
 
 #[cfg(test)]

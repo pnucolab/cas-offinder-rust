@@ -1,7 +1,7 @@
 mod cli_utils;
 
 use cas_offinder_lib::*;
-use std::io::Write;
+use std::io::{Write, LineWriter};
 use std::io::BufWriter;
 use std::path::Path;
 use std::thread;
@@ -54,13 +54,11 @@ fn get_usage_with_devices()->String{
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2{
-        println!("{}",get_usage_with_devices());
+        eprintln!("{}",get_usage_with_devices());
         return;
     }
     let start_time = Instant::now();
     let run_info:SearchRunInfo = parse_and_validate_args(&args).unwrap();
-    let mut out_file = File::create(run_info.out_path).unwrap();
-    let mut out_buf_writer = BufWriter::new(out_file);
 
     let (src_sender, src_receiver): (mpsc::SyncSender<ChromChunkInfo>, mpsc::Receiver<ChromChunkInfo>) = mpsc::sync_channel(4);
     let (dest_sender, dest_receiver): (mpsc::SyncSender<Vec<Match>>, mpsc::Receiver<Vec<Match>>) = mpsc::sync_channel(4);
@@ -68,14 +66,36 @@ fn main() {
         read_2bit(&src_sender, &Path::new(&run_info.genome_path)).unwrap();
     });
     let result_count = thread::spawn(move|| {
+        let out_writer = if run_info.out_path != "-" { 
+            Box::new(File::create(run_info.out_path).unwrap()) as Box<dyn Write>
+        } else {
+            Box::new(std::io::stdout()) as Box<dyn Write>
+        };
+        let mut out_buf_writer = BufWriter::new(out_writer);
+        let mut search_filter_buf = vec![0 as u8; cdiv(run_info.pattern_len,2)];
+        string_to_bit4(&mut search_filter_buf, &run_info.search_filter, 0, true);
+        let mut dna_buf = vec![0 as u8; cdiv(run_info.pattern_len,2)];
+        let mut marked_dna_buf: Vec<u8> = vec![0 as u8; run_info.pattern_len];
         for chunk in dest_receiver.iter(){
             for m in chunk{
-                let dir = if m.is_forward { '+'} else {'-'};
-                let rna_str = std::str::from_utf8(&&m.rna_seq).unwrap();
-                let dna_str = std::str::from_utf8(&&m.rna_seq).unwrap();
-                out_buf_writer.write_all(
-                    format!("{}\t{}\t{}\t{}\t{}\t{}\n",rna_str, m.chr_name, m.chrom_idx, dna_str, dir, m.mismatches).as_bytes()
-                ).unwrap();
+                dna_buf.fill(0);
+                string_to_bit4(&mut dna_buf, &m.dna_seq, 0, false);
+                let n_search_matches:u32 = dna_buf.iter().zip(search_filter_buf.iter()).map(|(x1,x2)|(*x1&*x2).count_ones()).sum();
+                if n_search_matches as usize == run_info.pattern_len{
+                    let dir = if m.is_forward { '+'} else {'-'};
+                    marked_dna_buf.clone_from_slice(&m.dna_seq);
+                    for (dnac, rnac) in marked_dna_buf.iter_mut().zip(m.rna_seq.iter()){
+                        if !cmp_chars(*dnac, *rnac){
+                            *dnac |= !0xdf;
+                        }
+                    }
+                    let rna_str = std::str::from_utf8(&m.rna_seq).unwrap();
+                    let dna_str = std::str::from_utf8(&marked_dna_buf).unwrap();
+                    write!(out_buf_writer, "{}\t{}\t{}\t{}\t{}\t{}\r\n",rna_str, m.chr_name, m.chrom_idx, dna_str, dir, m.mismatches).unwrap();
+                    // .write_fmt(
+                    //     format!().as_bytes()
+                    // ).unwrap();
+                }
             }
         }
     });
@@ -99,7 +119,7 @@ fn main() {
     send_thread.join().unwrap();
     result_count.join().unwrap();
     let tot_time = start_time.elapsed();
-    println!("Took {}s",tot_time.as_secs_f64());
+    eprintln!("Completed in {}s",tot_time.as_secs_f64());
     // assert_eq!(result_count.join().unwrap(), expected_results);
 }
 
