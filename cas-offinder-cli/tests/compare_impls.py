@@ -21,7 +21,7 @@ def get_gold_data(in_filename, device):
     if not os.path.exists(data_fname):
         print("Generating gold comparison data")
         args = [in_filename, 'G', data_fname]
-        subprocess.run(["./bin/cas-offinder-2.exe"] + args,stdout=subprocess.PIPE)
+        subprocess.run(["./bin/cas-offinder-2"] + args,stdout=subprocess.PIPE)
     with open(data_fname,'rb') as f:
         return f.read()
 
@@ -30,7 +30,7 @@ def compare_on_input(input_filename, device):
     print("started",flush=True)
     out2 = get_gold_data(input_filename, device)
     print("finishedgold",flush=True)
-    out1 = subprocess.run(["./target/release/cas-offinder-cli.exe"] + args,stdout=subprocess.PIPE).stdout
+    out1 = subprocess.run(["./target/release/cas-offinder-cli"] + args,stdout=subprocess.PIPE).stdout
     print("finished test")
 
     with tempfile.NamedTemporaryFile() as file1, \
