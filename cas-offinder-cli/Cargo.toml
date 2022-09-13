@@ -1,0 +1,12 @@
+[package]
+name = "cas-offinder-cli"
+version = "0.1.0"
+edition = "2021"
+repository = "https://github.com/pnucolab/cas-offinder-rust"
+homepage = "https://github.com/pnucolab/cas-offinder-rust"
+authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pusan.ac.kr>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+cas_offinder_lib = { path = "../cas-offinder-lib", version = "0.1.0" }
