@@ -48,10 +48,10 @@ struct SearchMatch{
 }
 
 const MAX_QUEUED: usize = 1;
-fn create_ocl_buf<T>(context:&context::Context, size:usize)->Result<memory::Buffer<T>>{
+unsafe fn create_ocl_buf<T>(context:&context::Context, size:usize)->Result<memory::Buffer<T>>{
     memory::Buffer::create(&context, memory::CL_MEM_READ_WRITE, size, null_mut())
 }
-fn create_ocl_bufs<T>(context:&context::Context,size:usize)->Result<[memory::Buffer<T>;MAX_QUEUED]>{
+unsafe fn create_ocl_bufs<T>(context:&context::Context,size:usize)->Result<[memory::Buffer<T>;MAX_QUEUED]>{
     Ok([
         create_ocl_buf::<T>(&context,size)?,
         // create_ocl_buf::<T>(&context,size)?
@@ -65,7 +65,8 @@ fn prefered_block_size(dev:&device::Device)->Result<usize>{
 }
 // fn get_prog_args(pattern_len:)
 fn search_device_ocl(max_mismatches: u32, pattern_len: usize, patterns: Arc<Vec<u8>>, context: Arc<context::Context>, program: Arc<program::Program>, dev:Arc<device::Device>, recv: crossbeam_channel::Receiver<SearchChunkInfo>, dest: mpsc::SyncSender<SearchChunkResult>)->Result<()>{
-    const OUT_BUF_SIZE: usize = 1<<22; 
+    unsafe{
+    const OUT_BUF_SIZE: usize = 1<<22;
     const CL_BLOCK: u32 = 1;
     const CL_NO_BLOCK: u32 = 0;
     let queue = command_queue::CommandQueue::create(&context, dev.id(), 0)?;
@@ -111,6 +112,7 @@ fn search_device_ocl(max_mismatches: u32, pattern_len: usize, patterns: Arc<Vec<
                 data: item.data,
             }).unwrap();
         }
+    }
     }
     Ok(())
 }

@@ -8,5 +8,5 @@ authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pu
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-opencl3 = { path = "../opencl3", version = "0.8.0" }
+opencl3 = "0.9.0" 
 crossbeam-channel = "0.5"
