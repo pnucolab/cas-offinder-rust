@@ -3,7 +3,6 @@ use std::num;
 use std::string;
 use std::sync::mpsc::SendError;
 
-
 #[derive(Debug)]
 pub enum CliError {
     IoError(io::Error),
@@ -14,7 +13,6 @@ pub enum CliError {
     ArgumentError(&'static str),
 }
 pub type Result<T> = std::result::Result<T, CliError>;
-
 
 impl From<io::Error> for CliError {
     fn from(error: io::Error) -> Self {
