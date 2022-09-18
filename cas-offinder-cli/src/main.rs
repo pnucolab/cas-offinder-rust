@@ -6,17 +6,17 @@ use cas_offinder_lib::*;
 use std::env;
 use std::fs::File;
 use std::io::BufWriter;
-use std::io::{LineWriter, Write};
+use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
 fn get_usage(device_strs: &[String]) -> String {
-    const PKG_VERSION: &'static str = env!("CARGO_PKG_VERSION");
+    const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
     // const PKG_EDITION: &'static str = env!("CARGO_PKG_DATETIME");
-    const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
-    const HOMEPAGE: &'static str = env!("CARGO_PKG_HOMEPAGE");
+    const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
+    const HOMEPAGE: &str = env!("CARGO_PKG_HOMEPAGE");
     let dev_info = device_strs.join("\n");
     format!(
         "
@@ -44,10 +44,7 @@ Available device list:
 }
 fn get_usage_with_devices() -> String {
     let run_config = match OclRunConfig::new(OclDeviceType::ALL) {
-        Err(err) => panic!(
-            "OpenCL runtime errored on load with error: {}",
-            err.to_string()
-        ),
+        Err(err) => panic!("OpenCL runtime errored on load with error: {}", err),
         Ok(cfg) => cfg,
     };
     get_usage(&run_config.get_device_strs())
@@ -68,7 +65,7 @@ fn main() {
     let (dest_sender, dest_receiver): (mpsc::SyncSender<Vec<Match>>, mpsc::Receiver<Vec<Match>>) =
         mpsc::sync_channel(4);
     let send_thread = thread::spawn(move || {
-        read_2bit(&src_sender, &Path::new(&run_info.genome_path)).unwrap();
+        read_2bit(&src_sender, Path::new(&run_info.genome_path)).unwrap();
     });
     let result_count = thread::spawn(move || {
         let out_writer = if run_info.out_path != "-" {
@@ -77,10 +74,10 @@ fn main() {
             Box::new(std::io::stdout()) as Box<dyn Write>
         };
         let mut out_buf_writer = BufWriter::new(out_writer);
-        let mut search_filter_buf = vec![0 as u8; cdiv(run_info.pattern_len, 2)];
+        let mut search_filter_buf = vec![0_u8; cdiv(run_info.pattern_len, 2)];
         string_to_bit4(&mut search_filter_buf, &run_info.search_filter, 0, true);
-        let mut dna_buf = vec![0 as u8; cdiv(run_info.pattern_len, 2)];
-        let mut marked_dna_buf: Vec<u8> = vec![0 as u8; run_info.pattern_len];
+        let mut dna_buf = vec![0_u8; cdiv(run_info.pattern_len, 2)];
+        let mut marked_dna_buf: Vec<u8> = vec![0_u8; run_info.pattern_len];
         for chunk in dest_receiver.iter() {
             for m in chunk {
                 dna_buf.fill(0);
@@ -106,25 +103,19 @@ fn main() {
                         rna_str, m.chr_name, m.chrom_idx, dna_str, dir, m.mismatches
                     )
                     .unwrap();
-                    // .write_fmt(
-                    //     format!().as_bytes()
-                    // ).unwrap();
                 }
             }
         }
     });
 
     let run_config = match OclRunConfig::new(run_info.dev_ty) {
-        Err(err) => panic!(
-            "OpenCL runtime errored on load with error: {}",
-            err.to_string()
-        ),
+        Err(err) => panic!("OpenCL runtime errored on load with error: {}", err),
         Ok(cfg) => cfg,
     };
     let reversed_byte_patterns: Vec<Vec<u8>> = run_info
         .patterns
         .iter()
-        .map(|v| reverse_compliment_char(&v))
+        .map(|v| reverse_compliment_char(v))
         .collect();
     let mut all_patterns: Vec<Vec<u8>> = run_info.patterns.clone();
     all_patterns.extend_from_slice(&reversed_byte_patterns);
@@ -132,7 +123,7 @@ fn main() {
     let all_patterns_4bit: Vec<Vec<u8>> = all_patterns
         .iter()
         .map(|pat| {
-            let mut buf = vec![0 as u8; cdiv(pat.len(), 2)];
+            let mut buf = vec![0_u8; cdiv(pat.len(), 2)];
             string_to_bit4(&mut buf, pat, 0, true);
             buf
         })

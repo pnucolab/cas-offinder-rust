@@ -15,7 +15,7 @@ pub fn roundup(x: usize, y: usize) -> usize {
 }
 
 const fn makebit4map(mixed_base: bool) -> [u8; NCHRS] {
-    let mut arr = [0 as u8; NCHRS];
+    let mut arr = [0_u8; NCHRS];
     arr['G' as usize] = G;
     arr['C' as usize] = C;
     arr['A' as usize] = A;
@@ -33,10 +33,10 @@ const fn makebit4map(mixed_base: bool) -> [u8; NCHRS] {
         arr['V' as usize] = A | C | G;
         arr['N' as usize] = A | C | G | T;
     }
-    return arr;
+    arr
 }
 const fn apply_lower(inarr: [u8; NCHRS]) -> [u8; NCHRS] {
-    let mut arr = [0 as u8; NCHRS];
+    let mut arr = [0_u8; NCHRS];
     let mut i = 1;
     while i <= 26 {
         arr[i + 96] = inarr[i + 64];
@@ -46,7 +46,7 @@ const fn apply_lower(inarr: [u8; NCHRS]) -> [u8; NCHRS] {
     arr
 }
 const fn invert_chrmap(inarr: [u8; NCHRS]) -> [u8; NCHRS] {
-    let mut arr = [0 as u8; NCHRS];
+    let mut arr = [0_u8; NCHRS];
     let mut i = 0;
     while i < NCHRS {
         let idx = NCHRS - i - 1;
@@ -58,7 +58,7 @@ const fn invert_chrmap(inarr: [u8; NCHRS]) -> [u8; NCHRS] {
     arr
 }
 const fn create_2bit_block_map() -> [u16; NCHRS] {
-    let mut arr = [0 as u16; NCHRS];
+    let mut arr = [0_u16; NCHRS];
     let mut i = 0;
     while i < NCHRS {
         let mut val: u16 = 0;
@@ -74,7 +74,7 @@ const fn create_2bit_block_map() -> [u16; NCHRS] {
     arr
 }
 const fn doubleup_patternmap(inarr: [u8; NCHRS]) -> [u8; NSHRTS] {
-    let mut arr = [0 as u8; NSHRTS];
+    let mut arr = [0_u8; NSHRTS];
     let mut i = 0;
     let mut outidx = 0;
     while i < NCHRS {
@@ -90,7 +90,7 @@ const fn doubleup_patternmap(inarr: [u8; NCHRS]) -> [u8; NSHRTS] {
     arr
 }
 const fn invert_double_patternmap(inarr: [u8; NSHRTS]) -> [u16; NCHRS] {
-    let mut arr = [0 as u16; NCHRS];
+    let mut arr = [0_u16; NCHRS];
     let mut i = 0;
     while i < NSHRTS {
         let idx = NSHRTS - 1 - i;
@@ -217,8 +217,7 @@ fn compliment_char(c: u8) -> u8 {
         c
     };
     //use original capitalization
-    let fixcaps = rev_char | (c & !0xdf);
-    fixcaps
+    rev_char | (c & !0xdf)
 }
 pub fn reverse_compliment_char_i(out_data: &mut [u8]) {
     for c in out_data.iter_mut() {
@@ -246,7 +245,7 @@ mod tests {
     fn test_str2bit4() {
         let input_data = b"ACtGc";
         let expected_out: [u8; 3] = [0x24, 0x81, 0x02];
-        let mut actual_out = [0 as u8; 3];
+        let mut actual_out = [0_u8; 3];
         let offset = 0;
         let mixed_base = true;
         string_to_bit4(&mut actual_out, input_data, offset, mixed_base);
@@ -256,7 +255,7 @@ mod tests {
     fn test_str2bit4_offset_1() {
         let input_data = b"ACTGC";
         let expected_out: [u8; 3] = [0x40, 0x12, 0x28];
-        let mut actual_out = [0 as u8; 3];
+        let mut actual_out = [0_u8; 3];
         let offset = 1;
         let mixed_base = true;
         string_to_bit4(&mut actual_out, input_data, offset, mixed_base);
@@ -266,7 +265,7 @@ mod tests {
     fn test_str2bit4_offset_3() {
         let input_data = b"ACTGC";
         let expected_out: [u8; 4] = [0x00, 0x40, 0x12, 0x28];
-        let mut actual_out = [0 as u8; 4];
+        let mut actual_out = [0_u8; 4];
         let offset = 3;
         let mixed_base = true;
         string_to_bit4(&mut actual_out, input_data, offset, mixed_base);
@@ -276,7 +275,7 @@ mod tests {
     fn test_str2bit4_large() {
         let input_data = b"ACTGCAACTGCA";
         let expected_out: [u8; 6] = [0x24, 0x81, 0x42, 0x24, 0x81, 0x42];
-        let mut actual_out = [0 as u8; 6];
+        let mut actual_out = [0_u8; 6];
         let offset = 0;
         let mixed_base = true;
         string_to_bit4(&mut actual_out, input_data, offset, mixed_base);
@@ -286,7 +285,7 @@ mod tests {
     fn test_str2bit4_mixedbase() {
         let input_data = b"ARGN";
         let expected_out: [u8; 2] = [0xc4, 0xf8];
-        let mut actual_out = [0 as u8; 2];
+        let mut actual_out = [0_u8; 2];
         let offset = 0;
         let mixed_base = true;
         string_to_bit4(&mut actual_out, input_data, offset, mixed_base);
@@ -296,7 +295,7 @@ mod tests {
     fn test_str2bit4_mixedbase_off() {
         let input_data = b"ARGN";
         let expected_out: [u8; 2] = [0x04, 0x08];
-        let mut actual_out = [0 as u8; 2];
+        let mut actual_out = [0_u8; 2];
         let offset = 0;
         let mixed_base = false;
         string_to_bit4(&mut actual_out, input_data, offset, mixed_base);
@@ -307,7 +306,7 @@ mod tests {
         let input = [0x24, 0xc1, 0x0f];
         let expected_out = b"ACTRN";
         let out_size = expected_out.len();
-        let mut actual_out = vec![0 as u8; out_size];
+        let mut actual_out = vec![0_u8; out_size];
         let read_offset = 0;
         bit4_to_string(&mut actual_out, &input, read_offset, out_size);
         assert_eq!(actual_out, expected_out);
@@ -317,7 +316,7 @@ mod tests {
         let input = [0x40, 0x12, 0x28];
         let expected_out = b"ACTGC";
         let out_size = expected_out.len();
-        let mut actual_out = vec![0 as u8; out_size];
+        let mut actual_out = vec![0_u8; out_size];
         let read_offset = 1;
         bit4_to_string(&mut actual_out, &input, read_offset, out_size);
         assert_eq!(actual_out, expected_out);
@@ -327,7 +326,7 @@ mod tests {
         let input = [0x00, 0x40, 0x12, 0x28];
         let expected_out = b"ACTGC";
         let out_size = expected_out.len();
-        let mut actual_out = vec![0 as u8; out_size];
+        let mut actual_out = vec![0_u8; out_size];
         let read_offset = 3;
         bit4_to_string(&mut actual_out, &input, read_offset, out_size);
         assert_eq!(actual_out, expected_out);
@@ -360,7 +359,7 @@ mod tests {
             (2 << 6) | (1 << 4) | (0 << 2) | (3 << 0),
             (0 << 6) | (3 << 4) | (2 << 2) | (1 << 0),
         ];
-        let mut result = vec![0 as u8; expected.len()];
+        let mut result = vec![0_u8; expected.len()];
         bit2_to_bit4(&mut result, &input, input.len() * 4);
         assert_eq!(result, expected);
     }

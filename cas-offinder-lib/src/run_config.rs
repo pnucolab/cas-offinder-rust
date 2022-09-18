@@ -58,8 +58,7 @@ impl OclRunConfig {
         } else {
             self.devices
                 .iter()
-                .map(|(_, devs)| devs.iter())
-                .flatten()
+                .flat_map(|(_, devs)| devs.iter())
                 .map(|d| d.name().unwrap())
                 .collect()
         }

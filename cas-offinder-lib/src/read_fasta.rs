@@ -15,7 +15,7 @@ pub fn read_fasta(dest: &SyncSender<ChromChunkInfo>, fname: &Path) -> Result<(),
         chr_name: String::new(),
         chunk_start: 0,
         chunk_end: 0,
-        data: Box::new([0 as u8; CHUNK_SIZE_BYTES]),
+        data: Box::new([0_u8; CHUNK_SIZE_BYTES]),
     };
     for linerd in buffer_reader.lines() {
         let line = linerd?;
@@ -25,7 +25,7 @@ pub fn read_fasta(dest: &SyncSender<ChromChunkInfo>, fname: &Path) -> Result<(),
                 chr_name: next_chr_name,
                 chunk_start: cur.chunk_end,
                 chunk_end: cur.chunk_end,
-                data: Box::new([0 as u8; CHUNK_SIZE_BYTES]),
+                data: Box::new([0_u8; CHUNK_SIZE_BYTES]),
             };
             if cur.chunk_end != cur.chunk_start {
                 dest.send(cur)?;
@@ -47,7 +47,7 @@ pub fn read_fasta(dest: &SyncSender<ChromChunkInfo>, fname: &Path) -> Result<(),
                     chr_name: cur.chr_name.clone(),
                     chunk_start: cur.chunk_end,
                     chunk_end: cur.chunk_end,
-                    data: Box::new([0 as u8; CHUNK_SIZE_BYTES]),
+                    data: Box::new([0_u8; CHUNK_SIZE_BYTES]),
                 };
                 dest.send(cur)?;
                 cur = next_cur;

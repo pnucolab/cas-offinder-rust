@@ -9,19 +9,17 @@ use std::path::Path;
 use std::sync::mpsc::SyncSender;
 
 fn read_u32(reader: &mut BufReader<std::fs::File>) -> Result<u32> {
-    let mut buf = [0 as u8; 4];
+    let mut buf = [0_u8; 4];
     reader.read_exact(&mut buf)?;
-    unsafe {
-        return Ok(std::mem::transmute::<[u8; 4], u32>(buf));
-    }
+    unsafe { Ok(std::mem::transmute::<[u8; 4], u32>(buf)) }
 }
 fn read_u8(reader: &mut BufReader<std::fs::File>) -> Result<u8> {
-    let mut buf = [0 as u8; 1];
+    let mut buf = [0_u8; 1];
     reader.read_exact(&mut buf)?;
-    return Ok(buf[0]);
+    Ok(buf[0])
 }
 fn read_str(reader: &mut BufReader<std::fs::File>, n_bytes: usize) -> Result<String> {
-    let mut str_buf = vec![0 as u8; n_bytes];
+    let mut str_buf = vec![0_u8; n_bytes];
     reader.read_exact(&mut str_buf)?;
     Ok(String::from_utf8(str_buf)?)
 }
@@ -77,14 +75,14 @@ pub fn read_2bit(dest: &SyncSender<ChromChunkInfo>, fname: &Path) -> Result<()> 
         assert!(CHUNK_SIZE % 4 == 0);
         const NUCL_PER_BYTE: usize = 4;
         const RAW_BUF_LEN: usize = CHUNK_SIZE / NUCL_PER_BYTE;
-        let mut raw_buf = [0 as u8; RAW_BUF_LEN];
+        let mut raw_buf = [0_u8; RAW_BUF_LEN];
         let mut read_pos = 0;
         let mut block_mask_idx: i64 = 0;
 
         while read_pos < chrlen {
             let read_size = min(chrlen - read_pos, CHUNK_SIZE);
             reader.read_exact(&mut raw_buf[..cdiv(read_size, NUCL_PER_BYTE)])?;
-            let mut chrdata = Box::new([0 as u8; CHUNK_SIZE_BYTES]);
+            let mut chrdata = Box::new([0_u8; CHUNK_SIZE_BYTES]);
             bit2_to_bit4(&mut chrdata[..], &raw_buf, read_size);
             //go back one in case previous zone overlaps with current block
             block_mask_idx = max(block_mask_idx - 1, 0);

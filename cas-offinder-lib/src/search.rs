@@ -3,7 +3,6 @@ use opencl3::*;
 use crate::bit4ops::{cdiv, roundup};
 use crate::run_config::*;
 use crate::{bit4_to_string, chrom_chunk::*, reverse_compliment_char_i};
-use crossbeam_channel;
 use opencl3::Result;
 use std::ptr::null_mut;
 use std::sync::mpsc;
@@ -48,14 +47,14 @@ struct SearchMatch {
 
 const MAX_QUEUED: usize = 1;
 unsafe fn create_ocl_buf<T>(context: &context::Context, size: usize) -> Result<memory::Buffer<T>> {
-    memory::Buffer::create(&context, memory::CL_MEM_READ_WRITE, size, null_mut())
+    memory::Buffer::create(context, memory::CL_MEM_READ_WRITE, size, null_mut())
 }
 unsafe fn create_ocl_bufs<T>(
     context: &context::Context,
     size: usize,
 ) -> Result<[memory::Buffer<T>; MAX_QUEUED]> {
     Ok([
-        create_ocl_buf::<T>(&context, size)?,
+        create_ocl_buf::<T>(context, size)?,
         // create_ocl_buf::<T>(&context,size)?
     ])
 }
@@ -168,7 +167,7 @@ fn search_chunk_ocl(
     devices: OclRunConfig,
     max_mismatches: u32,
     pattern_len: usize,
-    patterns: &Vec<Vec<u8>>,
+    patterns: &[Vec<u8>],
     recv: crossbeam_channel::Receiver<SearchChunkInfo>,
     dest: mpsc::SyncSender<SearchChunkResult>,
 ) -> Result<()> {
@@ -179,7 +178,7 @@ fn search_chunk_ocl(
     let mut threads: Vec<JoinHandle<Result<()>>> = Vec::new();
     for (_, devs) in devices.get().iter() {
         let plat_devs: Vec<*mut std::ffi::c_void> = devs.iter().map(|d| d.id()).collect();
-        if plat_devs.len() > 0 {
+        if !plat_devs.is_empty() {
             let context = Arc::new(context::Context::from_devices(
                 &plat_devs,
                 &[0],
@@ -238,7 +237,7 @@ fn pack(d: &[u8]) -> u64 {
     unsafe { std::mem::transmute::<[u8; 8], u64>([d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]]) }
 }
 fn block_data_cpu(data: &[u8]) -> Vec<u64> {
-    data.chunks(8).map(|d| pack(d)).collect()
+    data.chunks(8).map(pack).collect()
 }
 fn search_chunk_cpu(
     max_mismatches: u32,
@@ -264,7 +263,7 @@ fn search_chunk_cpu(
     // assert!(n_patterns == 2);
     const NUCL_PER_BLOCK: usize = 2 * std::mem::size_of::<u64>();
     const BLOCKS_PER_EXEC: usize = 4;
-    let mut shifted_data = vec![0 as u64; BLOCKS_PER_EXEC + pattern_blocks + 1];
+    let mut shifted_data = vec![0_u64; BLOCKS_PER_EXEC + pattern_blocks + 1];
     for gen_block_idx in 0..checked_div(genome_blocks, BLOCKS_PER_EXEC) {
         let gen_idx = gen_block_idx * BLOCKS_PER_EXEC;
         shifted_data.fill(0);
@@ -275,7 +274,7 @@ fn search_chunk_cpu(
         shifted_data[..n_copy].copy_from_slice(&genome_ptr[gen_idx..][..n_copy]);
         for l in 0..NUCL_PER_BLOCK {
             for j in 0..n_patterns {
-                let mut num_matches = [0 as u32; BLOCKS_PER_EXEC];
+                let mut num_matches = [0_u32; BLOCKS_PER_EXEC];
                 for k in 0..pattern_blocks {
                     for o in 0..BLOCKS_PER_EXEC {
                         num_matches[o] += (shifted_data[k + o]
@@ -304,18 +303,17 @@ fn search_chunk_cpu(
     matches
 }
 
-fn pack_patterns(patterns: &Vec<Vec<u8>>) -> Vec<u8> {
+fn pack_patterns(patterns: &[Vec<u8>]) -> Vec<u8> {
     patterns
         .iter()
-        .map(|pattern| {
+        .flat_map(|pattern| {
             let pattern_padding =
                 cdiv(pattern.len(), PATTERN_CHUNK_SIZE) * PATTERN_CHUNK_SIZE - pattern.len();
             pattern
                 .iter()
                 .copied()
-                .chain((0..pattern_padding).map(|_| 0 as u8))
+                .chain((0..pattern_padding).map(|_| 0_u8))
         })
-        .flatten()
         .collect()
 }
 fn search_device_cpu_thread(
@@ -337,7 +335,7 @@ fn search_device_cpu_thread(
 fn search_compute_cpu(
     max_mismatches: u32,
     pattern_len: usize,
-    patterns: &Vec<Vec<u8>>,
+    patterns: &[Vec<u8>],
     recv: crossbeam_channel::Receiver<SearchChunkInfo>,
     dest: mpsc::SyncSender<SearchChunkResult>,
 ) {
@@ -358,8 +356,8 @@ fn search_compute_cpu(
     }
 }
 
-fn chunks_to_searchchunk(chunk_buf: &Vec<ChromChunkInfo>) -> SearchChunkInfo {
-    let mut search_buf = Box::new([0 as u8; SEARCH_CHUNK_SIZE_BYTES]);
+fn chunks_to_searchchunk(chunk_buf: &[ChromChunkInfo]) -> SearchChunkInfo {
+    let mut search_buf = Box::new([0_u8; SEARCH_CHUNK_SIZE_BYTES]);
     let mut names: Vec<String> = Vec::with_capacity(CHUNKS_PER_SEARCH);
     let mut starts: Vec<u64> = Vec::with_capacity(CHUNKS_PER_SEARCH);
     let mut ends: Vec<u64> = Vec::with_capacity(CHUNKS_PER_SEARCH);
@@ -405,8 +403,8 @@ fn convert_matches(
         let is_past_end = pos + pattern_len as u64 > search_res.meta.chunk_ends[idx];
         if !is_last_chunk && !(is_end_chrom && is_past_end) {
             let is_forward = (smatch.pattern_idx as usize) < patterns.len() / 2;
-            let mut dna_result: Vec<u8> = vec![0 as u8; pattern_len];
-            let mut rna_result: Vec<u8> = vec![0 as u8; pattern_len];
+            let mut dna_result: Vec<u8> = vec![0_u8; pattern_len];
+            let mut rna_result: Vec<u8> = vec![0_u8; pattern_len];
             bit4_to_string(
                 &mut dna_result,
                 &search_res.data[..],
@@ -446,7 +444,7 @@ pub fn search(
     dest: mpsc::SyncSender<Vec<Match>>,
 ) {
     /* public facing function, sends and receives data chunk by chunk */
-    assert!(patterns.len() > 0);
+    assert!(!patterns.is_empty());
     assert!(patterns[0].len() * 2 >= pattern_len);
     let (compute_send_src, compute_recv_src): (
         crossbeam_channel::Sender<SearchChunkInfo>,
@@ -482,7 +480,7 @@ pub fn search(
                     }
                 }
             }
-            if buf.len() > 0 {
+            if !buf.is_empty() {
                 compute_send_src.send(chunks_to_searchchunk(&buf)).unwrap();
             }
         })
@@ -568,14 +566,14 @@ mod tests {
         });
         let pattern1 = b"CCGTGGTTCAACATTTGCTTAGCA";
         let pattern2 = b"GATGTTGGTAAGTGGGATATGGCA";
-        let mut pattern3 = pattern1.clone();
-        let mut pattern4 = pattern2.clone();
+        let mut pattern3 = *pattern1;
+        let mut pattern4 = *pattern2;
         pattern3.reverse();
         pattern4.reverse();
-        let mut pattern1_bit4 = vec![0 as u8; 12];
-        let mut pattern2_bit4 = vec![0 as u8; 12];
-        let mut pattern3_bit4 = vec![0 as u8; 12];
-        let mut pattern4_bit4 = vec![0 as u8; 12];
+        let mut pattern1_bit4 = vec![0_u8; 12];
+        let mut pattern2_bit4 = vec![0_u8; 12];
+        let mut pattern3_bit4 = vec![0_u8; 12];
+        let mut pattern4_bit4 = vec![0_u8; 12];
         string_to_bit4(&mut pattern1_bit4, pattern1, 0, true);
         string_to_bit4(&mut pattern2_bit4, pattern2, 0, true);
         string_to_bit4(&mut pattern3_bit4, &pattern3, 0, true);

@@ -17,7 +17,7 @@ fn gather_chrom_results(rec: &Receiver<ChromChunkInfo>) -> Vec<ChromChunkInfo> {
 fn concat_results_as_str(chunks: &[ChromChunkInfo]) -> Vec<u8> {
     let mut res: Vec<u8> = Vec::new();
     for chunk in chunks.iter() {
-        let mut chrchunk = [0 as u8; CHUNK_SIZE];
+        let mut chrchunk = [0_u8; CHUNK_SIZE];
         bit4_to_string(&mut chrchunk, &chunk.data[..], 0, chunk.size());
         res.extend(chrchunk.iter().take(chunk.size()));
     }

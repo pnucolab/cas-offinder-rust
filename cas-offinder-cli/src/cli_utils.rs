@@ -44,17 +44,17 @@ fn parse_and_validate_input(in_path: &String) -> Result<InFileInfo> {
 
     let reader = BufReader::new(file);
     let mut line_iter = reader.lines();
-    let genome_line = line_iter
+    let genome_path = line_iter
         .next()
         .ok_or(CliError::ArgumentError(file_too_short_err))??;
     let searcher_line = line_iter
         .next()
         .ok_or(CliError::ArgumentError(file_too_short_err))??;
-    let search_buf = searcher_line.trim_end().as_bytes().to_vec();
-    if !is_mixedbase_str(&search_buf) {
+    let search_filter = searcher_line.trim_end().as_bytes().to_vec();
+    if !is_mixedbase_str(&search_filter) {
         return Err(mixed_base_error);
     }
-    let pattern_len = search_buf.len();
+    let pattern_len = search_filter.len();
 
     let mut patterns: Vec<Vec<u8>> = Vec::new();
     let mut pattern_infos: Vec<String> = Vec::new();
@@ -102,13 +102,13 @@ fn parse_and_validate_input(in_path: &String) -> Result<InFileInfo> {
         None => Err(CliError::ArgumentError(
             "Input file must contain at least 1 pattern line",
         )),
-        Some(mismatchs) => Ok(InFileInfo {
-            genome_path: genome_line,
-            search_filter: search_buf,
-            patterns: patterns,
-            pattern_infos: pattern_infos,
-            pattern_len: pattern_len,
-            max_mismatches: mismatchs,
+        Some(max_mismatches) => Ok(InFileInfo {
+            genome_path,
+            search_filter,
+            patterns,
+            pattern_infos,
+            pattern_len,
+            max_mismatches,
         }),
     }
 }
@@ -131,7 +131,7 @@ pub fn parse_and_validate_args(args: &Vec<String>) -> Result<SearchRunInfo> {
         pattern_len: parsed_in_file.pattern_len,
         max_mismatches: parsed_in_file.max_mismatches,
         out_path: out_filename.clone(),
-        dev_ty: get_dev_ty(&device_ty_str)?,
+        dev_ty: get_dev_ty(device_ty_str)?,
     })
 }
 
@@ -144,7 +144,7 @@ mod tests {
     fn test_str2bit4() {
         let input_data = b"ACtGc";
         let expected_out: [u8; 3] = [0x24, 0x81, 0x02];
-        let mut actual_out = [0 as u8; 3];
+        let mut actual_out = [0_u8; 3];
         let offset = 0;
         let mixed_base = true;
         string_to_bit4(&mut actual_out, input_data, offset, mixed_base);

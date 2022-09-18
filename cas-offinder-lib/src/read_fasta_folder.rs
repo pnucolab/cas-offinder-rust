@@ -15,7 +15,7 @@ pub fn read_fasta_folder(dest: &SyncSender<ChromChunkInfo>, folder: &Path) -> Re
                 "paths must be utf-8 encodeable",
             ))?;
             if path_name.ends_with(".fa") {
-                read_fasta(&dest, &path_p)?;
+                read_fasta(dest, &path_p)?;
             }
         }
     }

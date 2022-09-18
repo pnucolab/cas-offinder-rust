@@ -1,5 +1,3 @@
-// #![const_eval_limit = "100000000"]
-
 mod bit4ops;
 mod chrom_chunk;
 mod cli_err;
