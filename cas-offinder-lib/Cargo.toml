@@ -1,6 +1,6 @@
 [package]
 name = "cas_offinder_lib"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pusan.ac.kr>"]
 
@@ -8,5 +8,5 @@ authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pu
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-opencl3 = "0.9.0" 
-crossbeam-channel = "0.5"
+opencl3 = "0.9.4" 
+crossbeam-channel = "0.5.8"

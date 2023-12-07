@@ -1,0 +1,29 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'cas-offinder-cli'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=cas-offinder-cli",
+                    "--package=cas-offinder-cli"
+                ],
+                "filter": {
+                    "name": "cas-offinder-cli",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}/cas-offinder-cli/target/debug",
+            "env": {
+                "PATH": "${env:HOME}/micromamba/envs/rust/bin:${env:PATH}"
+            }
+        }
+    ]
+}   

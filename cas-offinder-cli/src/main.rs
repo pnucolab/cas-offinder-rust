@@ -6,11 +6,13 @@ use cas_offinder_lib::*;
 use std::env;
 use std::fs::File;
 use std::io::BufWriter;
+use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
+use std::fs;
 
 fn get_usage(device_strs: &[String]) -> String {
     const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -20,9 +22,9 @@ fn get_usage(device_strs: &[String]) -> String {
     let dev_info = device_strs.join("\n");
     format!(
         "
-Cas-OFFinder-Rust v{}
+Cas-OFFinder 2 - v{}
 
-Copyright (c) 2022 {}
+Copyright (c) 2023 {}
 Website: {}
 
 Usage: cas-offinder [options] {{input_filename|-}} {{C|G|A}}[device_id(s)] {{output_filename|-}}
@@ -47,6 +49,7 @@ fn get_usage_with_devices() -> String {
         Err(err) => panic!("OpenCL runtime errored on load with error: {}", err),
         Ok(cfg) => cfg,
     };
+    
     get_usage(&run_config.get_device_strs())
 }
 fn main() {
@@ -65,7 +68,20 @@ fn main() {
     let (dest_sender, dest_receiver): (mpsc::SyncSender<Vec<Match>>, mpsc::Receiver<Vec<Match>>) =
         mpsc::sync_channel(4);
     let send_thread = thread::spawn(move || {
-        read_2bit(&src_sender, Path::new(&run_info.genome_path)).unwrap();
+        let genome_path = Path::new(&run_info.genome_path);
+        let is_folder = fs::metadata(genome_path).unwrap().is_dir();
+        if is_folder {
+            read_fasta_folder(&src_sender, genome_path).unwrap();
+        } else {
+            let mut file = File::open(genome_path).unwrap();
+            let mut first_byte = [0_u8; 1];
+            file.read_exact(&mut first_byte).unwrap();
+            if first_byte[0] == b'>' {
+                read_fasta(&src_sender, genome_path).unwrap();
+            } else {
+                read_2bit(&src_sender, genome_path).unwrap();
+            }
+        }
     });
     let result_count = thread::spawn(move || {
         let out_writer = if run_info.out_path != "-" {
