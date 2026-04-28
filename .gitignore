@@ -32,3 +32,4 @@ opencl3
 /test_*
 /time_*
 /benchmark/*
+auto_test_crispritz_conda.sh

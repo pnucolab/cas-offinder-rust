@@ -10,3 +10,4 @@ authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pu
 
 [dependencies]
 cas_offinder_lib = { path = "../cas-offinder-lib", version = "1.0.0" }
+itoa = "1"

@@ -3,6 +3,7 @@ mod cli_utils;
 use crate::cli_utils::parse_and_validate_args;
 use crate::cli_utils::SearchRunInfo;
 use cas_offinder_lib::*;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs::File;
 use std::io::BufWriter;
@@ -125,36 +126,49 @@ fn main() {
         } else {
             Box::new(std::io::stdout()) as Box<dyn Write>
         };
-        let mut out_buf_writer = BufWriter::new(out_writer);
+        // 1 MB buffer (default 8 KB) — far fewer write() syscalls on
+        // multi-GB outputs (db≥2 / db+rb mixed configs).
+        let mut out_buf_writer = BufWriter::with_capacity(1 << 20, out_writer);
 
         // Unified cas-offinder-bulge header (always emit)
-        writeln!(
-            out_buf_writer,
-            "#Bulge type\tcrRNA\tDNA\tChromosome\tPosition\tDirection\tMismatches\tBulge Size"
-        )
-        .unwrap();
+        out_buf_writer
+            .write_all(b"#Bulge type\tcrRNA\tDNA\tChromosome\tPosition\tDirection\tMismatches\tBulge Size\n")
+            .unwrap();
 
         let mut marked_dna_buf: Vec<u8> = vec![0_u8; pattern_len_clone];
         let mut total_matches: u64 = 0;
+        // Counter keyed by (mismatches, dna_bulges, rna_bulges). BTreeMap so
+        // dump order is deterministic and sorted.
+        let mut summary: BTreeMap<(u32, u32, u32), u64> = BTreeMap::new();
+        // Reusable scratch buffer for one output line: assembled then
+        // write_all'd once, avoiding per-field fmt::Write calls and per-match
+        // heap allocations.
+        let mut scratch: Vec<u8> = Vec::with_capacity(256);
+        // itoa::Buffer is a stack-allocated 40-byte scratch — avoids
+        // fmt::Display allocation per integer.
+        let mut itoa_buf = itoa::Buffer::new();
 
         for chunk in dest_receiver.iter() {
             for mut m in chunk {
-                let (bulge_type, bulge_size, rna_out, dna_out);
-                let dir = if m.is_forward { '+' } else { '-' };
+                let bulge_type: &[u8];
+                let bulge_size: u32;
+                let dir: u8 = if m.is_forward { b'+' } else { b'-' };
+                let rna_bytes: &[u8];
+                let dna_bytes: &[u8];
 
                 if use_myers {
                     // Myers path: bulge info already classified, PAM already verified.
                     let total = m.dna_bulge_size + m.rna_bulge_size;
                     bulge_type = if total == 0 {
-                        "X"
+                        b"X"
                     } else if m.dna_bulge_size > 0 {
-                        "DNA"
+                        b"DNA"
                     } else {
-                        "RNA"
+                        b"RNA"
                     };
                     bulge_size = total;
-                    rna_out = m.rna_seq.clone();
-                    dna_out = m.dna_seq.clone();
+                    rna_bytes = &m.rna_seq;
+                    dna_bytes = &m.dna_seq;
                 } else {
                     // Legacy popcount path (bulge=0): apply post-hoc PAM filter
                     // and mark mismatched DNA bases lowercase (old convention).
@@ -215,14 +229,12 @@ fn main() {
                             *dnac |= !0xdf;
                         }
                     }
-                    bulge_type = "X";
+                    bulge_type = b"X";
                     bulge_size = 0;
-                    rna_out = m.rna_seq.clone();
-                    dna_out = marked_dna_buf.clone();
+                    rna_bytes = &m.rna_seq;
+                    dna_bytes = &marked_dna_buf;
                 }
 
-                let rna_str = std::str::from_utf8(&rna_out).unwrap();
-                let dna_str = std::str::from_utf8(&dna_out).unwrap();
                 // Match original cas-offinder position convention:
                 //   + strand: leftmost + strand coord (= Rust internal)
                 //   - strand: shifted by (PAM_len - 1 - dna_bulge_size)
@@ -234,16 +246,37 @@ fn main() {
                             .saturating_sub(1)
                             .saturating_sub(m.dna_bulge_size as u64)
                 };
-                writeln!(
-                    out_buf_writer,
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
-                    bulge_type, rna_str, dna_str, m.chr_name, pos_out, dir, m.mismatches, bulge_size
-                )
-                .unwrap();
+
+                // Assemble one full row in `scratch`, then a single write_all.
+                scratch.clear();
+                scratch.extend_from_slice(bulge_type);
+                scratch.push(b'\t');
+                scratch.extend_from_slice(rna_bytes);
+                scratch.push(b'\t');
+                scratch.extend_from_slice(dna_bytes);
+                scratch.push(b'\t');
+                scratch.extend_from_slice(m.chr_name.as_bytes());
+                scratch.push(b'\t');
+                scratch.extend_from_slice(itoa_buf.format(pos_out).as_bytes());
+                scratch.push(b'\t');
+                scratch.push(dir);
+                scratch.push(b'\t');
+                scratch.extend_from_slice(itoa_buf.format(m.mismatches).as_bytes());
+                scratch.push(b'\t');
+                scratch.extend_from_slice(itoa_buf.format(bulge_size).as_bytes());
+                scratch.push(b'\n');
+                out_buf_writer.write_all(&scratch).unwrap();
+
+                // Tally for the .summary.txt file.
+                *summary
+                    .entry((m.mismatches, m.dna_bulge_size, m.rna_bulge_size))
+                    .or_insert(0) += 1;
+
                 total_matches += 1;
             }
         }
-        total_matches
+        out_buf_writer.flush().unwrap();
+        (total_matches, summary)
     });
 
     let run_config = match OclRunConfig::new(run_info.dev_ty) {
@@ -270,9 +303,21 @@ fn main() {
         dest_sender,
     );
     send_thread.join().unwrap();
-    let total_matches = result_count.join().unwrap();
+    let (total_matches, summary) = result_count.join().unwrap();
     let tot_time = start_time.elapsed();
     eprintln!("Completed in {}s", tot_time.as_secs_f64());
+
+    // Write .summary.txt next to the output (skip when writing to stdout).
+    // Format: TSV with one row per (mm, db, rb) tuple plus a total comment.
+    if log_out_path != "-" {
+        let summary_path = format!("{}.summary.txt", log_out_path);
+        if let Err(e) = write_summary_file(&summary_path, total_matches, &summary) {
+            eprintln!(
+                "warning: failed to write summary file '{}': {}",
+                summary_path, e
+            );
+        }
+    }
 
     // Write .log file alongside the output (skip when writing to stdout).
     if log_out_path != "-" {
@@ -302,4 +347,25 @@ fn main() {
             eprintln!("warning: failed to write log file '{}': {}", log_path, e);
         }
     }
+}
+
+/// Dump the per-(mismatch, dna_bulge, rna_bulge) match counter to a TSV
+/// file alongside the main output. Header rows start with `#`.
+fn write_summary_file(
+    path: &str,
+    total: u64,
+    summary: &BTreeMap<(u32, u32, u32), u64>,
+) -> std::io::Result<()> {
+    let mut f = BufWriter::new(File::create(path)?);
+    writeln!(
+        f,
+        "# Match counts by (mismatches, dna_bulges, rna_bulges)"
+    )?;
+    writeln!(f, "# total: {}", total)?;
+    writeln!(f, "mm\tdb\trb\tcount")?;
+    for ((mm, db, rb), count) in summary {
+        writeln!(f, "{}\t{}\t{}\t{}", mm, db, rb, count)?;
+    }
+    f.flush()?;
+    Ok(())
 }
