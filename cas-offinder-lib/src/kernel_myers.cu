@@ -369,12 +369,33 @@ extern "C" __global__ void find_matches_myers(
         if (trans == 1) {
             stack[top].trans = 2;
             if (rna_cost != INF_COST && rb < MAX_RNA_BULGES) {
+                // RNA bulge skips pattern[k] where k = cpi - 1.
+                //
+                // C++ cas-offinder enumerates compare strings for k in
+                // `[first_non_N, last_non_N)` of the *user's input pattern* and
+                // searches each compare on both forward and RC of the genome
+                // (cas-offinder.cpp:671-682). For our forward-orientation
+                // pattern (p < n_fwd_patterns) this maps directly: forbid
+                // k == last_non_N(p). For our RC pattern (p >= n_fwd_patterns)
+                // the equivalent set of allowed k's, after reversing
+                // coordinates, is `[first_non_N + 1, last_non_N + 1)` — i.e.
+                // forbid k == first_non_N(p). first/last_non_N are derived
+                // from pam_offsets[p] which marks where PAM N's begin (0 for
+                // PAM-first, > 0 for PAM-last).
                 uint8_t pb4 = get_pattern(pattern_bit4, p, cpi - 1);
-                uint8_t next_is_pam = (cpi < PATTERN_LEN)
-                    ? (get_pattern(pattern_bit4, p, cpi) == 0x0F) : 0;
-                uint8_t prev_is_pam = (cpi >= 2)
-                    ? (get_pattern(pattern_bit4, p, cpi - 2) == 0x0F) : 0;
-                if (pb4 != 0x0F && !next_is_pam && !prev_is_pam) {
+                uint32_t pam_off_p = (uint32_t)pam_offsets[p];
+                uint32_t first_non_n;
+                uint32_t last_non_n;
+                if (pam_off_p == 0) {
+                    first_non_n = (uint32_t)PAM_LEN;
+                    last_non_n  = (uint32_t)(PATTERN_LEN - 1);
+                } else {
+                    first_non_n = 0u;
+                    last_non_n  = pam_off_p - 1u;
+                }
+                uint32_t forbidden = (p >= n_fwd_patterns) ? first_non_n
+                                                           : last_non_n;
+                if (pb4 != 0x0F && (uint32_t)(cpi - 1) != forbidden) {
                     uint8_t new_cost = cost + 1;
                     uint8_t rem = dp[(cpi - 1) * (TEXT_WINDOW + 1) + ctj];
                     if ((uint32_t)new_cost + (uint32_t)rem <= (uint32_t)MAX_EDITS

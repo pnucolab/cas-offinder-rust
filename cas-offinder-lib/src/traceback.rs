@@ -186,6 +186,7 @@ pub fn traceback_all(
     max_rna_bulges: u32,
     max_mismatches: u32,
     pam_is_n: &[bool],
+    is_rc: bool,
 ) -> Vec<Alignment> {
     let m = pattern_bit4.len();
     let n = text_bit4.len();
@@ -226,13 +227,24 @@ pub fn traceback_all(
 
     let mut results: Vec<Alignment> = Vec::new();
     let mut ops: Vec<EditOp> = Vec::new();
+    // C++ cas-offinder enumerates RNA-bulge compare strings for skip positions
+    // k in `[first_non_N, last_non_N)` of the user's input pattern (see
+    // cas-offinder.cpp:671-682), then searches each on both forward and RC of
+    // the genome. For our forward pattern this maps directly: forbid
+    // k == last_non_N. For our RC pattern (which represents the same physical
+    // alignments via RC of the user's input), the equivalent allowed set after
+    // coordinate reversal is `[first_non_N + 1, last_non_N + 1)` — i.e. forbid
+    // k == first_non_N.
+    let first_non_n: usize = pam_is_n.iter().position(|&x| !x).unwrap_or(0);
+    let last_non_n: usize = pam_is_n.iter().rposition(|&x| !x).unwrap_or(0);
+    let forbidden_skip: usize = if is_rc { first_non_n } else { last_non_n };
     enumerate(
         m, n,
         &mut ops,
         0, 0, 0, 0,
         &dp, pattern_bit4, text_bit4,
         max_edits, max_dna_bulges, max_rna_bulges, max_mismatches,
-        pam_is_n,
+        pam_is_n, forbidden_skip,
         &mut results,
     );
     results
@@ -255,6 +267,7 @@ fn enumerate(
     max_rna: u32,
     max_mm: u32,
     pam_is_n: &[bool],
+    forbidden_skip: usize,
     results: &mut Vec<Alignment>,
 ) {
     // Prune: any path through (i,j) has total cost >= cost + dp[i][j].
@@ -319,7 +332,7 @@ fn enumerate(
                 cost + mc, mm + mc, db, rb,
                 dp, pattern_bit4, text_bit4,
                 max_edits, max_dna, max_rna, max_mm,
-                pam_is_n, results,
+                pam_is_n, forbidden_skip, results,
             );
             ops.pop();
         }
@@ -327,26 +340,23 @@ fn enumerate(
 
     // RNA bulge: pattern[i-1] consumed (skipped from the text alignment).
     //
-    // cas-offinder-bulge (C++) forbids RNA bulges that would skip a PAM N
-    // OR a crRNA position adjacent to the PAM — skipping the crRNA base
-    // next to the PAM effectively shortens the guide by one, which cas-
-    // offinder does not allow (the pattern length is fixed). We mirror
-    // that convention here so Rust and C++ enumerate the same set.
+    // cas-offinder-bulge (C++) enumerates compare strings for skip positions k
+    // in `[first_non_N, last_non_N)` of the user's input pattern and searches
+    // each on both forward and RC of the genome. Forbidden skip is therefore
+    // `last_non_N` for the forward pattern and (after coordinate reversal)
+    // `first_non_N` for the RC pattern; this single forbidden position is
+    // captured in `forbidden_skip`.
     if rb < max_rna && max_rna > 0 {
         let pattern_pos_is_n = pam_is_n[i - 1];
-        // PAM-last: pattern[i-1] is the last crRNA base when pam_is_n[i] is
-        // true. PAM-first: pattern[i-1] is the first crRNA base when
-        // pam_is_n[i-2] is true.
-        let next_is_pam = i < pattern_bit4.len() && pam_is_n[i];
-        let prev_is_pam = i >= 2 && pam_is_n[i - 2];
-        if !pattern_pos_is_n && !next_is_pam && !prev_is_pam {
+        let is_forbidden = (i - 1) == forbidden_skip;
+        if !pattern_pos_is_n && !is_forbidden {
             ops.push(EditOp::RnaBulge);
             enumerate(
                 i - 1, j, ops,
                 cost + 1, mm, db, rb + 1,
                 dp, pattern_bit4, text_bit4,
                 max_edits, max_dna, max_rna, max_mm,
-                pam_is_n, results,
+                pam_is_n, forbidden_skip, results,
             );
             ops.pop();
         }
@@ -373,7 +383,7 @@ fn enumerate(
                 cost + 1, mm, db + 1, rb,
                 dp, pattern_bit4, text_bit4,
                 max_edits, max_dna, max_rna, max_mm,
-                pam_is_n, results,
+                pam_is_n, forbidden_skip, results,
             );
             ops.pop();
         }

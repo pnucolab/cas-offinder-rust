@@ -33,3 +33,6 @@ opencl3
 /time_*
 /benchmark/*
 auto_test_crispritz_conda.sh
+
+figure.ipynb
+/figure/*

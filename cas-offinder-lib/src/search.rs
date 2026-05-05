@@ -597,6 +597,7 @@ struct SearchChunkResultMyers {
 fn classify_myers_candidate(
     end_pos: usize,
     pattern_idx: usize,
+    n_fwd_patterns: usize,
     genome_bit4: &[u8],
     patterns_bit4: &[Vec<u8>],
     pattern_is_n: &[Vec<bool>],
@@ -628,6 +629,7 @@ fn classify_myers_candidate(
         max_rna_bulges,
         max_mismatches,
         is_n_pat,
+        pattern_idx >= n_fwd_patterns,
     );
     let mut out: Vec<(SearchMatch, MyersAlignment)> = Vec::with_capacity(alignments.len());
 
@@ -782,6 +784,7 @@ fn search_chunk_myers(
     max_rna_bulges: u32,
     patterns_bit4: &[Vec<u8>],
     pattern_len: usize,
+    n_fwd_patterns: usize,
     effective_filters_bit4: &[Vec<u8>],
     pattern_is_n: &[Vec<bool>],
     pam_precheck: &[(usize, Vec<u8>)],
@@ -879,6 +882,7 @@ fn search_chunk_myers(
             for (sm, al) in classify_myers_candidate(
                 t_pos,
                 p_idx,
+                n_fwd_patterns,
                 chunk_data_bit4,
                 patterns_bit4,
                 pattern_is_n,
@@ -902,6 +906,7 @@ fn search_device_cpu_thread_myers(
     max_rna_bulges: u32,
     patterns_bit4: Arc<Vec<Vec<u8>>>,
     pattern_len: usize,
+    n_original_patterns: usize,
     effective_filters_bit4: Arc<Vec<Vec<u8>>>,
     pattern_is_n: Arc<Vec<Vec<bool>>>,
     pam_precheck: Arc<Vec<(usize, Vec<u8>)>>,
@@ -931,6 +936,7 @@ fn search_device_cpu_thread_myers(
             max_rna_bulges,
             &patterns_bit4,
             pattern_len,
+            n_original_patterns,
             &effective_filters_bit4,
             &pattern_is_n,
             &pam_precheck,
@@ -1016,6 +1022,7 @@ fn search_compute_cpu_myers(
                 max_rna_bulges,
                 t_pat,
                 pattern_len,
+                n_original_patterns,
                 t_filt,
                 t_isn,
                 t_pam,
