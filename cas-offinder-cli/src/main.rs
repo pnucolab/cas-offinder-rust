@@ -93,6 +93,12 @@ fn main() {
     let log_out_path = run_info.out_path.clone();
     let log_genome_path = run_info.genome_path.clone();
     let log_n_patterns = run_info.patterns.len();
+    // pattern_labels[user_guide_idx] — used for the per-row Id column.
+    // Match cas-offinder C++: pattern_idx in [0, n_user) is the forward copy,
+    // [n_user, 2*n_user) is the reverse-complement; both map to the same
+    // user-supplied label via `pattern_idx % n_user`.
+    let pattern_labels = run_info.pattern_labels.clone();
+    let n_user_patterns = run_info.patterns.len();
     let log_search_filter = run_info.search_filter.clone();
     let log_max_mismatches = run_info.max_mismatches;
     let log_max_dna_bulges = run_info.max_dna_bulges;
@@ -130,9 +136,12 @@ fn main() {
         // multi-GB outputs (db≥2 / db+rb mixed configs).
         let mut out_buf_writer = BufWriter::with_capacity(1 << 20, out_writer);
 
-        // Unified cas-offinder-bulge header (always emit)
+        // Unified cas-offinder-bulge header (always emit). The leading Id
+        // column carries the user-supplied label from the input file (or an
+        // auto-assigned 0-based index when none was given), matching
+        // cas-offinder C++ output.
         out_buf_writer
-            .write_all(b"#Bulge type\tcrRNA\tDNA\tChromosome\tPosition\tDirection\tMismatches\tBulge Size\n")
+            .write_all(b"#Id\tBulge type\tcrRNA\tDNA\tChromosome\tPosition\tDirection\tMismatches\tBulge Size\n")
             .unwrap();
 
         let mut marked_dna_buf: Vec<u8> = vec![0_u8; pattern_len_clone];
@@ -247,8 +256,16 @@ fn main() {
                             .saturating_sub(m.dna_bulge_size as u64)
                 };
 
+                // Map back from the internal pattern index (forward + RC
+                // copies stored consecutively) to the user-supplied guide
+                // label.
+                let user_idx = (m.pattern_idx as usize) % n_user_patterns;
+                let label = pattern_labels[user_idx].as_bytes();
+
                 // Assemble one full row in `scratch`, then a single write_all.
                 scratch.clear();
+                scratch.extend_from_slice(label);
+                scratch.push(b'\t');
                 scratch.extend_from_slice(bulge_type);
                 scratch.push(b'\t');
                 scratch.extend_from_slice(rna_bytes);
@@ -307,10 +324,27 @@ fn main() {
     let tot_time = start_time.elapsed();
     eprintln!("Completed in {}s", tot_time.as_secs_f64());
 
-    // Write .summary.txt next to the output (skip when writing to stdout).
+    // Write _summary.txt next to the output (skip when writing to stdout).
+    // Naming: replace the output filename's extension with `_summary.txt`
+    // (e.g. `out.txt` -> `out_summary.txt`, `path/run.tsv` ->
+    // `path/run_summary.txt`, `output` (no ext) -> `output_summary.txt`).
     // Format: TSV with one row per (mm, db, rb) tuple plus a total comment.
     if log_out_path != "-" {
-        let summary_path = format!("{}.summary.txt", log_out_path);
+        let summary_path = {
+            let path = std::path::Path::new(&log_out_path);
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output");
+            let summary_name = format!("{}_summary.txt", stem);
+            match path.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => parent
+                    .join(summary_name)
+                    .to_string_lossy()
+                    .into_owned(),
+                _ => summary_name,
+            }
+        };
         if let Err(e) = write_summary_file(&summary_path, total_matches, &summary) {
             eprintln!(
                 "warning: failed to write summary file '{}': {}",
@@ -319,9 +353,25 @@ fn main() {
         }
     }
 
-    // Write .log file alongside the output (skip when writing to stdout).
+    // Write _log.txt file alongside the output (skip when writing to stdout).
+    // Same naming rule as the summary file: strip the output filename's
+    // extension and append `_log.txt`.
     if log_out_path != "-" {
-        let log_path = format!("{}.log", log_out_path);
+        let log_path = {
+            let path = std::path::Path::new(&log_out_path);
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output");
+            let log_name = format!("{}_log.txt", stem);
+            match path.parent() {
+                Some(parent) if !parent.as_os_str().is_empty() => parent
+                    .join(log_name)
+                    .to_string_lossy()
+                    .into_owned(),
+                _ => log_name,
+            }
+        };
         let genome_size = fs::metadata(&log_genome_path).map(|m| m.len()).unwrap_or(0);
         let algorithm = if use_myers {
             "Myers bit-parallel".to_string()

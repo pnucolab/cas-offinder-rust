@@ -20,6 +20,7 @@ pub struct SearchRunInfo {
     pub dev_ty: OclDeviceType,
     pub search_filter: Vec<u8>,
     pub patterns: Vec<Vec<u8>>,
+    pub pattern_labels: Vec<String>,
     pub pattern_len: usize,
     pub max_mismatches: u32,
     pub max_dna_bulges: u32,
@@ -29,6 +30,7 @@ struct InFileInfo {
     genome_path: String,
     search_filter: Vec<u8>,
     patterns: Vec<Vec<u8>>,
+    pattern_labels: Vec<String>,
     pattern_len: usize,
     max_mismatches: u32,
     max_dna_bulges: u32,
@@ -71,6 +73,7 @@ fn parse_and_validate_input(in_path: &String) -> Result<InFileInfo> {
     let pattern_len = search_filter.len();
 
     let mut patterns: Vec<Vec<u8>> = Vec::new();
+    let mut pattern_labels: Vec<String> = Vec::new();
     let mut is_using_info_opt: Option<bool> = None;
     let mut mismatches_opt: Option<u32> = None;
     for line_r in line_iter {
@@ -97,9 +100,14 @@ fn parse_and_validate_input(in_path: &String) -> Result<InFileInfo> {
         if mismatches != cur_mismatches {
             return Err(CliError::ArgumentError("In this version of cas-offinder, all mismatches on every line of input file must be the same"));
         }
-        if is_using_info {
-            lineparts.get(2).ok_or(CliError::ArgumentError("Pattern lines in input file must be consistently have either 2 or 3 elements, no mixing and matching allowed"))?;
-        }
+        // Match cas-offinder C++ semantics: if a label is provided on any line,
+        // all lines must provide one; otherwise auto-assign the 0-based line
+        // number as the label.
+        let label: String = if is_using_info {
+            lineparts.get(2).ok_or(CliError::ArgumentError("Pattern lines in input file must be consistently have either 2 or 3 elements, no mixing and matching allowed"))?.to_string()
+        } else {
+            patterns.len().to_string()
+        };
 
         if pattern_buf.len() != pattern_len {
             return Err(CliError::ArgumentError(
@@ -107,6 +115,7 @@ fn parse_and_validate_input(in_path: &String) -> Result<InFileInfo> {
             ));
         }
         patterns.push(pattern_buf);
+        pattern_labels.push(label);
     }
     match mismatches_opt {
         None => Err(CliError::ArgumentError(
@@ -116,6 +125,7 @@ fn parse_and_validate_input(in_path: &String) -> Result<InFileInfo> {
             genome_path,
             search_filter,
             patterns,
+            pattern_labels,
             pattern_len,
             max_mismatches,
             max_dna_bulges,
@@ -138,6 +148,7 @@ pub fn parse_and_validate_args(args: &Vec<String>) -> Result<SearchRunInfo> {
         genome_path: parsed_in_file.genome_path,
         search_filter: parsed_in_file.search_filter,
         patterns: parsed_in_file.patterns,
+        pattern_labels: parsed_in_file.pattern_labels,
         pattern_len: parsed_in_file.pattern_len,
         max_mismatches: parsed_in_file.max_mismatches,
         max_dna_bulges: parsed_in_file.max_dna_bulges,
