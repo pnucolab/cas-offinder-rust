@@ -122,11 +122,12 @@ extern "C" __global__ void find_matches_myers(
     uint32_t j_end,                  // sub-range upper bound (excludes grid-padding threads)
     uint32_t active_start_nucl,
     uint32_t total_nucl,
+    uint32_t pattern_start,          // pattern batch offset (CUDA grid_dim.y <= 65535)
     s_match* __restrict__ out_matches,
     uint32_t* __restrict__ out_count
 ) {
     uint32_t j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
-    uint32_t p = blockIdx.y * blockDim.y + threadIdx.y;
+    uint32_t p = blockIdx.y * blockDim.y + threadIdx.y + pattern_start;
 
     if (p >= n_patterns) return;
     if (j >= j_end) return;

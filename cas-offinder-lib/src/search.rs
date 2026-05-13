@@ -1124,25 +1124,45 @@ fn search_device_cuda_myers(
             // clEnqueueNDRangeKernel global_work_offset: host launches with
             // grid sized for the sub-range width; kernel adds `j_start` to
             // its thread index to recover the absolute `j`.
-            let cfg = launch_cfg_2d(sub_len, n_patterns);
-            let mut launch = stream.launch_builder(&kernel);
-            launch.arg(&genome_buf);
-            launch.arg(&peq_buf);
-            launch.arg(&pattern_buf);
-            launch.arg(&pam_off_buf);
-            launch.arg(&pam_filt_buf);
-            launch.arg(&n_patterns);
-            launch.arg(&n_fwd_patterns);
-            launch.arg(&sub_start);
-            launch.arg(&sub_end);
-            launch.arg(&active_start_nucl);
-            launch.arg(&n_active_nucl);
-            launch.arg(&out_buf);
-            launch.arg(&out_count);
-            unsafe { launch.launch(cfg) }?;
+            //
+            // CUDA caps grid_dim.y at 65535, so when n_patterns exceeds that
+            // (large gene sets like glycine_max with 60+ genes ⇒ 79k+ rev-
+            // comp patterns) we sweep patterns in batches and pass
+            // `pattern_start` to the kernel so the per-thread pattern index
+            // recovers the absolute `p`. out_count is the same atomic across
+            // batches so the overflow / bisection logic still works.
+            const MAX_GRID_Y: u32 = 65000;
+            let mut total_found: usize = 0;
+            let mut pattern_start: u32 = 0;
+            while pattern_start < n_patterns {
+                let batch_len = (n_patterns - pattern_start).min(MAX_GRID_Y);
+                let cfg = launch_cfg_2d(sub_len, batch_len);
+                let mut launch = stream.launch_builder(&kernel);
+                launch.arg(&genome_buf);
+                launch.arg(&peq_buf);
+                launch.arg(&pattern_buf);
+                launch.arg(&pam_off_buf);
+                launch.arg(&pam_filt_buf);
+                launch.arg(&n_patterns);
+                launch.arg(&n_fwd_patterns);
+                launch.arg(&sub_start);
+                launch.arg(&sub_end);
+                launch.arg(&active_start_nucl);
+                launch.arg(&n_active_nucl);
+                launch.arg(&pattern_start);
+                launch.arg(&out_buf);
+                launch.arg(&out_count);
+                unsafe { launch.launch(cfg) }?;
 
-            let count_vec = stream.memcpy_dtov(&out_count)?;
-            let total_found = count_vec[0] as usize;
+                let count_vec = stream.memcpy_dtov(&out_count)?;
+                total_found = count_vec[0] as usize;
+
+                // Stop early on overflow; bisection below handles it.
+                if total_found > out_buf_size {
+                    break;
+                }
+                pattern_start += batch_len;
+            }
 
             if total_found > out_buf_size {
                 let mid = sub_start + (sub_end - sub_start) / 2;
@@ -1517,7 +1537,12 @@ pub fn search(
     // process, before any SearchChunkInfo is built). CPU-only runs keep default.
     init_search_chunk_nucl_from_devices(&devices);
 
-    let use_myers = max_dna_bulges > 0 || max_rna_bulges > 0;
+    // Always use the Myers DP path. The legacy popcount CUDA kernel
+    // (`kernel.cu`) has unresolved OOB / CUDA errors on this hardware,
+    // so we route everything (including bulge=0) through Myers. The
+    // Myers kernel collapses db_range / rb_range to 1 when both
+    // MAX_*_BULGES are 0, matching the popcount-path intent.
+    let use_myers = true;
 
     // Convert patterns to bit4 for GPU / legacy CPU path
     let patterns_bit4: Vec<Vec<u8>> = patterns_ascii
