@@ -146,9 +146,15 @@ fn main() {
 
         let mut marked_dna_buf: Vec<u8> = vec![0_u8; pattern_len_clone];
         let mut total_matches: u64 = 0;
-        // Counter keyed by (mismatches, dna_bulges, rna_bulges). BTreeMap so
-        // dump order is deterministic and sorted.
-        let mut summary: BTreeMap<(u32, u32, u32), u64> = BTreeMap::new();
+        // Per-pattern mismatch histogram for the summary file. Each pattern
+        // gets a fixed length-(SUMMARY_MAX_MM+1) row counting hits at
+        // exactly i mismatches. Bulge hits are excluded; hits with
+        // mismatches > SUMMARY_MAX_MM are also excluded so the summary
+        // stays a fixed-shape table regardless of the search's
+        // max_mismatches setting.
+        let hist_len = SUMMARY_MAX_MM + 1;
+        let mut pat_hist: Vec<Vec<u64>> =
+            (0..n_user_patterns).map(|_| vec![0u64; hist_len]).collect();
         // Reusable scratch buffer for one output line: assembled then
         // write_all'd once, avoiding per-field fmt::Write calls and per-match
         // heap allocations.
@@ -284,16 +290,22 @@ fn main() {
                 scratch.push(b'\n');
                 out_buf_writer.write_all(&scratch).unwrap();
 
-                // Tally for the .summary.txt file.
-                *summary
-                    .entry((m.mismatches, m.dna_bulge_size, m.rna_bulge_size))
-                    .or_insert(0) += 1;
+                // Tally for the _summary.txt file: per-input-pattern mismatch
+                // histogram, restricted to bulge-free hits. RC copies fold
+                // back onto the same user_idx, so forward + RC hits for the
+                // same guide share a row.
+                if m.dna_bulge_size == 0
+                    && m.rna_bulge_size == 0
+                    && (m.mismatches as usize) <= SUMMARY_MAX_MM
+                {
+                    pat_hist[user_idx][m.mismatches as usize] += 1;
+                }
 
                 total_matches += 1;
             }
         }
         out_buf_writer.flush().unwrap();
-        (total_matches, summary)
+        (total_matches, pat_hist)
     });
 
     let run_config = match OclRunConfig::new(run_info.dev_ty) {
@@ -320,7 +332,7 @@ fn main() {
         dest_sender,
     );
     send_thread.join().unwrap();
-    let (total_matches, summary) = result_count.join().unwrap();
+    let (total_matches, pat_hist) = result_count.join().unwrap();
     let tot_time = start_time.elapsed();
     eprintln!("Completed in {}s", tot_time.as_secs_f64());
 
@@ -345,7 +357,7 @@ fn main() {
                 _ => summary_name,
             }
         };
-        if let Err(e) = write_summary_file(&summary_path, total_matches, &summary) {
+        if let Err(e) = write_summary_file(&summary_path, &pat_hist) {
             eprintln!(
                 "warning: failed to write summary file '{}': {}",
                 summary_path, e
@@ -399,22 +411,49 @@ fn main() {
     }
 }
 
-/// Dump the per-(mismatch, dna_bulge, rna_bulge) match counter to a TSV
-/// file alongside the main output. Header rows start with `#`.
+/// Fixed cap on the per-pattern mismatch histogram. The summary file always
+/// shows n0..nN where N = SUMMARY_MAX_MM, regardless of the search's
+/// max_mismatches. Hits exceeding this cap are excluded from the summary.
+const SUMMARY_MAX_MM: usize = 3;
+
+/// Dump the per-input-pattern mismatch histogram to a TSV file alongside
+/// the main output. Each input pattern produces a length-(SUMMARY_MAX_MM+1)
+/// vector (n0, n1, ..., nN) counting bulge-free hits at exactly i mismatches
+/// for i <= SUMMARY_MAX_MM. Patterns sharing the same histogram tuple are
+/// grouped onto one row.
 fn write_summary_file(
     path: &str,
-    total: u64,
-    summary: &BTreeMap<(u32, u32, u32), u64>,
+    pat_hist: &[Vec<u64>],
 ) -> std::io::Result<()> {
     let mut f = BufWriter::new(File::create(path)?);
+    let hist_len = SUMMARY_MAX_MM + 1;
+    // Group patterns by histogram tuple. BTreeMap on Vec<u64> gives
+    // lexicographic ordering: (0,0,..,0) first, then (0,0,..,1), etc.
+    let mut groups: BTreeMap<Vec<u64>, u64> = BTreeMap::new();
+    for h in pat_hist {
+        *groups.entry(h.clone()).or_insert(0) += 1;
+    }
     writeln!(
         f,
-        "# Match counts by (mismatches, dna_bulges, rna_bulges)"
+        "# Pattern histogram by mismatch count (bulge hits excluded; mm > {} excluded)",
+        SUMMARY_MAX_MM
     )?;
-    writeln!(f, "# total: {}", total)?;
-    writeln!(f, "mm\tdb\trb\tcount")?;
-    for ((mm, db, rb), count) in summary {
-        writeln!(f, "{}\t{}\t{}\t{}", mm, db, rb, count)?;
+    writeln!(f, "# total_patterns: {}", pat_hist.len())?;
+    for i in 0..hist_len {
+        if i > 0 {
+            write!(f, "\t")?;
+        }
+        write!(f, "n{}", i)?;
+    }
+    writeln!(f, "\tcount")?;
+    for (tuple, count) in &groups {
+        for (i, v) in tuple.iter().enumerate() {
+            if i > 0 {
+                write!(f, "\t")?;
+            }
+            write!(f, "{}", v)?;
+        }
+        writeln!(f, "\t{}", count)?;
     }
     f.flush()?;
     Ok(())

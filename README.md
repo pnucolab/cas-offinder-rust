@@ -97,3 +97,6 @@ G | 100 | 6 | TTTN | 25 | 34.044556856155396 | **3.716431140899658**
 ```
 
 As you can see, the GPU results are uniformly faster, often by a wide margin. The CPU results are mixed, but the worst case for the new implementation is only 2x slower than the old implementation. 
+
+Summary
+SUMMARY_MAX_MM = 3; cas-offinder-cli/src/main.rs:407 
