@@ -51,21 +51,33 @@ __device__ __forceinline__ uint32_t popcount_block(block_ty v) {
     }
 }
 
+// Match output buffer capacity (in s_match entries). The host allocates a
+// buffer of exactly this size; nvrtc bakes in the real value via -D. This
+// fallback only applies if the define is somehow missing.
+#ifndef OUT_BUF_SIZE
+#define OUT_BUF_SIZE (4 * 1024 * 1024)
+#endif
+
 extern "C" __global__ void find_matches(
     const block_ty* __restrict__ genome,
     const block_ty* __restrict__ pattern_blocks,
     uint32_t max_mismatches,
     uint32_t match_start_min_nucl,
-    uint32_t n_genome_execs,
+    uint32_t exec_start,
+    uint32_t exec_end,
     uint32_t n_patterns,
     s_match* __restrict__ match_buffer,
     int* __restrict__ entrycount
 ) {
-    uint32_t exec_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // `exec_start` offsets the thread index so the host can launch the kernel
+    // over a sub-range [exec_start, exec_end) of execs. This lets the host
+    // bisect the range and re-run when a chunk produces more candidates than
+    // the output buffer can hold (mirrors the Myers kernel's j_start/j_end).
+    uint32_t exec_idx = blockIdx.x * blockDim.x + threadIdx.x + exec_start;
     uint32_t pattern_block_idx = blockIdx.y * blockDim.y + threadIdx.y;
     // CUDA rounds the grid up to a multiple of the block size, so ignore the
-    // trailing threads that would otherwise read past `n_genome_execs`.
-    if (exec_idx >= n_genome_execs) return;
+    // trailing threads that would otherwise read past `exec_end`.
+    if (exec_idx >= exec_end) return;
     if (pattern_block_idx >= n_patterns) return;
     size_t genome_idx = (size_t)exec_idx * BLOCKS_PER_EXEC;
 
@@ -102,14 +114,19 @@ extern "C" __global__ void find_matches(
             uint32_t loc = (genome_idx + o) * BLOCKS_AVAIL + k;
             if (mismatches <= (int)max_mismatches && loc >= match_start_min_nucl) {
                 int next_idx = atomicAdd(entrycount, 1);
-                uint32_t mm_u = (mismatches < 0) ? 0u : (uint32_t)mismatches;
-                s_match next_item;
-                next_item.loc = loc;
-                next_item.pattern_idx = (uint32_t)pattern_block_idx;
-                next_item.mismatches = mm_u;
-                next_item.dna_bulge_size = 0;
-                next_item.rna_bulge_size = 0;
-                match_buffer[next_idx] = next_item;
+                // Bounds guard: keep counting past the buffer (the host reads
+                // the final count and bisects the exec range on overflow) but
+                // never write out of bounds.
+                if (next_idx < (int)OUT_BUF_SIZE) {
+                    uint32_t mm_u = (mismatches < 0) ? 0u : (uint32_t)mismatches;
+                    s_match next_item;
+                    next_item.loc = loc;
+                    next_item.pattern_idx = (uint32_t)pattern_block_idx;
+                    next_item.mismatches = mm_u;
+                    next_item.dna_bulge_size = 0;
+                    next_item.rna_bulge_size = 0;
+                    match_buffer[next_idx] = next_item;
+                }
             }
         }
     }

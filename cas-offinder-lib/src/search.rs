@@ -53,6 +53,12 @@ const CPU_BLOCK_SIZE: usize = 8;
 const GPU_BLOCK_SIZE: usize = 4;
 const PATTERN_CHUNK_SIZE: usize = 16;
 const CL_BLOCKS_PER_EXEC: usize = 4;
+/// GPU match-output buffer capacity (in SearchMatch entries) for the popcount
+/// path. The kernel guards its writes against this value (passed as -D) and
+/// the host bisects the exec range whenever the atomic candidate count exceeds
+/// it, so results stay complete regardless of how many candidates a chunk
+/// produces. Must stay in sync with the -DOUT_BUF_SIZE compile define.
+const POPCOUNT_OUT_BUF_SIZE: usize = 1 << 22;
 
 #[derive(Clone)]
 struct SearchChunkMeta {
@@ -230,6 +236,7 @@ fn get_compile_defs(pattern_len: usize) -> Vec<String> {
         format!("-DPATTERN_LEN={}", pattern_len),
         format!("-DBLOCKS_PER_EXEC={}", CL_BLOCKS_PER_EXEC),
         format!("-DPATTERN_CHUNK_SIZE={}", PATTERN_CHUNK_SIZE),
+        format!("-DOUT_BUF_SIZE={}", POPCOUNT_OUT_BUF_SIZE),
         "-Dblock_ty=uint32_t".to_string(),
     ]);
     out
@@ -255,14 +262,13 @@ fn search_device_cuda(
     recv: crossbeam_channel::Receiver<SearchChunkInfo>,
     dest: mpsc::SyncSender<SearchChunkResult>,
 ) -> Result<()> {
-    const OUT_BUF_SIZE: usize = 1 << 22;
     let stream = ctx.default_stream();
     let module = ctx.load_module(cudarc::nvrtc::Ptx::from_src(ptx_source.as_str()))?;
     let kernel = module.load_function("find_matches")?;
 
     let mut genome_buf: CudaSlice<u8> = stream.alloc_zeros(search_chunk_bytes())?;
     let mut out_count: CudaSlice<i32> = stream.alloc_zeros(1)?;
-    let out_buf: CudaSlice<SearchMatch> = stream.alloc_zeros(OUT_BUF_SIZE)?;
+    let out_buf: CudaSlice<SearchMatch> = stream.alloc_zeros(POPCOUNT_OUT_BUF_SIZE)?;
     let pattern_buf: CudaSlice<u8> = stream.memcpy_stod(patterns.as_slice())?;
 
     let pattern_blocked_size = roundup(cdiv(pattern_len, 2), PATTERN_CHUNK_SIZE);
@@ -286,28 +292,67 @@ fn search_device_cuda(
             legacy_match_start_min_nucl(&item.meta, pattern_len);
 
         stream.memcpy_htod(&item.data[..n_total_bytes], &mut genome_buf)?;
-        let zero: [i32; 1] = [0];
-        stream.memcpy_htod(&zero, &mut out_count)?;
 
-        let n_execs_u32 = n_genome_execs as u32;
         let n_patterns_u32 = n_patterns as u32;
-        let cfg = launch_cfg_2d(n_execs_u32, n_patterns_u32);
-        let mut launch = stream.launch_builder(&kernel);
-        launch.arg(&genome_buf);
-        launch.arg(&pattern_buf);
-        launch.arg(&max_mismatches);
-        launch.arg(&match_start_min_nucl);
-        launch.arg(&n_execs_u32);
-        launch.arg(&n_patterns_u32);
-        launch.arg(&out_buf);
-        launch.arg(&out_count);
-        unsafe { launch.launch(cfg) }?;
+        // Launch the kernel over a shrinking stack of exec sub-ranges. The
+        // popcount kernel emits a candidate superset (genome 'N' inflates the
+        // popcount so negative-mm hits pass the loose filter and the host
+        // recomputes the real count), so a single chunk can produce far more
+        // candidates than the output buffer holds. Read the atomic count
+        // after each launch: if it exceeds the buffer the kernel dropped the
+        // overflow (its write is bounds-guarded), so bisect the exec range and
+        // re-run the two halves. Ranges that fit append their matches. Mirrors
+        // the Myers path's j_start/j_end bisection.
+        let mut outvec: Vec<SearchMatch> = Vec::new();
+        let mut pending: Vec<(u32, u32)> = vec![(0u32, n_genome_execs as u32)];
+        while let Some((sub_start, sub_end)) = pending.pop() {
+            if sub_start >= sub_end {
+                continue;
+            }
+            let zero: [i32; 1] = [0];
+            stream.memcpy_htod(&zero, &mut out_count)?;
 
-        let count_vec = stream.memcpy_dtov(&out_count)?;
-        let readsize = count_vec[0].max(0) as usize;
-        if readsize > 0 {
-            let read_slice = out_buf.slice(..readsize);
-            let outvec = stream.memcpy_dtov(&read_slice)?;
+            let sub_len = sub_end - sub_start;
+            let cfg = launch_cfg_2d(sub_len, n_patterns_u32);
+            let mut launch = stream.launch_builder(&kernel);
+            launch.arg(&genome_buf);
+            launch.arg(&pattern_buf);
+            launch.arg(&max_mismatches);
+            launch.arg(&match_start_min_nucl);
+            launch.arg(&sub_start);
+            launch.arg(&sub_end);
+            launch.arg(&n_patterns_u32);
+            launch.arg(&out_buf);
+            launch.arg(&out_count);
+            unsafe { launch.launch(cfg) }?;
+
+            let count_vec = stream.memcpy_dtov(&out_count)?;
+            let total_found = count_vec[0].max(0) as usize;
+
+            if total_found > POPCOUNT_OUT_BUF_SIZE {
+                let mid = sub_start + (sub_end - sub_start) / 2;
+                if mid == sub_start || mid == sub_end {
+                    panic!(
+                        "GPU match buffer overflow on minimal exec range \
+                         [{sub_start}, {sub_end}): {} candidates > {}. \
+                         Increase POPCOUNT_OUT_BUF_SIZE.",
+                        total_found, POPCOUNT_OUT_BUF_SIZE
+                    );
+                }
+                pending.push((mid, sub_end));
+                pending.push((sub_start, mid));
+                continue;
+            }
+            if total_found == 0 {
+                continue;
+            }
+
+            let read_slice = out_buf.slice(..total_found);
+            let mut sub = stream.memcpy_dtov(&read_slice)?;
+            outvec.append(&mut sub);
+        }
+
+        if !outvec.is_empty() {
             dest.send(SearchChunkResult {
                 matches: outvec,
                 meta: item.meta,
@@ -1537,12 +1582,13 @@ pub fn search(
     // process, before any SearchChunkInfo is built). CPU-only runs keep default.
     init_search_chunk_nucl_from_devices(&devices);
 
-    // Always use the Myers DP path. The legacy popcount CUDA kernel
-    // (`kernel.cu`) has unresolved OOB / CUDA errors on this hardware,
-    // so we route everything (including bulge=0) through Myers. The
-    // Myers kernel collapses db_range / rb_range to 1 when both
-    // MAX_*_BULGES are 0, matching the popcount-path intent.
-    let use_myers = true;
+    // Route mismatch-only searches through the fast popcount kernel and any
+    // bulge search through the Myers DP kernel. The popcount path's former
+    // OOB crash (a chunk emitting more candidates than the 4M output buffer
+    // → unguarded OOB write + unclamped host slice → cudarc panic) is fixed:
+    // the kernel now bounds-guards its write and the host bisects the exec
+    // range and re-runs on overflow, exactly like the Myers path.
+    let use_myers = max_dna_bulges > 0 || max_rna_bulges > 0;
 
     // Convert patterns to bit4 for GPU / legacy CPU path
     let patterns_bit4: Vec<Vec<u8>> = patterns_ascii
