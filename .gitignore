@@ -29,15 +29,18 @@ opencl3
 
 /GRCh38.primary_assembly.genome.fa
 /GRCh38.primary_assembly.genome.fa.gz
+/GRCh38.primary_assembly.genome_split
+/GRCh38.primary_assembly.genome.fa.fai
 /test_*
 /time_*
 /benchmark/*
 auto_test_crispritz_conda.sh
 
+
 figure.ipynb
 /figure/*
+figure.ipynb.bak
 
 # Large built artifacts — distribute via GitHub Releases, not git
-/Download/cas-offinder-cli-v2
-/Download/docker/cas-offinder-cli
-/Download/docker/*.tar.gz
+/Download/*
+cas-database/*

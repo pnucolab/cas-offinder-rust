@@ -15,12 +15,11 @@ use std::thread;
 use std::time::Instant;
 use std::fs;
 
-fn get_usage(device_strs: &[String]) -> String {
+fn get_usage() -> String {
     const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
     // const PKG_EDITION: &'static str = env!("CARGO_PKG_DATETIME");
     const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
     const HOMEPAGE: &str = env!("CARGO_PKG_HOMEPAGE");
-    let dev_info = device_strs.join("\n");
     format!(
         "
 Cas-OFFinder 2 - v{}
@@ -28,35 +27,42 @@ Cas-OFFinder 2 - v{}
 Copyright (c) 2023 {}
 Website: {}
 
-Usage: cas-offinder [options] {{input_filename|-}} {{C|G|A}}[device_id(s)] {{output_filename|-}}
+Usage: cas-offinder {{input_filename|-}} {{C|G|A}} {{output_filename|-}}
 (C: using CPUs, G: using GPUs, A: using accelerators)
 
-Example input file:
-/var/chromosomes/human_hg19
+Input file format:
+  line 1  : genome file or directory (FASTA or 2bit)
+  line 2  : {{pattern_with_PAM}} [{{DNA_bulge_size}} {{RNA_bulge_size}}]
+  line 3+ : {{crRNA_sequence}} {{mismatches}} [{{id}}]
+
+[1] Mismatch-only search
+/var/chromosomes/human_hg38
 NNNNNNNNNNNNNNNNNNNNNRG
 GGCCGACCTGTCGCTGACGCNNN 5
 CGCCAGCGTCAGCGACAGGTNNN 5
-ACGGCGCCAGCGTCAGCGACNNN 5
-GTCGCTGACGCTGGCGCCGTNNN 5
 
-Available device list:
-{}
+[2] Search allowing bulges
+/var/chromosomes/human_hg38
+NNNNNNNNNNNNNNNNNNNNNRG 2 1
+GGCCGACCTGTCGCTGACGCNNN 5 TP53_g1
+CGCCAGCGTCAGCGACAGGTNNN 5 BRCA1_g2
+
+Notes:
+  * Bulge sizes are optional and default to 0 (mismatch-only search). There is
+    no hard upper limit, but values above 2 are rarely used and get much
+    slower, since search cost grows with mismatches + DNA bulge + RNA bulge.
+  * On line 2, N marks the guide region and the remaining bases define the PAM.
+    All patterns must be the same length, and at most 64 bases long.
+  * The mismatch count must be identical on every crRNA line.
+  * The id column is optional, but if any line has one, all lines must.
 ",
-        PKG_VERSION, AUTHORS, HOMEPAGE, dev_info
+        PKG_VERSION, AUTHORS, HOMEPAGE
     )
-}
-fn get_usage_with_devices() -> String {
-    let run_config = match OclRunConfig::new(OclDeviceType::ALL) {
-        Err(err) => panic!("OpenCL runtime errored on load with error: {}", err),
-        Ok(cfg) => cfg,
-    };
-    
-    get_usage(&run_config.get_device_strs())
 }
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("{}", get_usage_with_devices());
+        eprintln!("{}", get_usage());
         return;
     }
     let start_time = Instant::now();

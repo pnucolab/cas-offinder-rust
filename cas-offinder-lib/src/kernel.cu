@@ -66,6 +66,7 @@ extern "C" __global__ void find_matches(
     uint32_t exec_start,
     uint32_t exec_end,
     uint32_t n_patterns,
+    uint32_t pattern_start,
     s_match* __restrict__ match_buffer,
     int* __restrict__ entrycount
 ) {
@@ -74,7 +75,10 @@ extern "C" __global__ void find_matches(
     // bisect the range and re-run when a chunk produces more candidates than
     // the output buffer can hold (mirrors the Myers kernel's j_start/j_end).
     uint32_t exec_idx = blockIdx.x * blockDim.x + threadIdx.x + exec_start;
-    uint32_t pattern_block_idx = blockIdx.y * blockDim.y + threadIdx.y;
+    // `pattern_start` offsets the y-index so the host can sweep patterns in
+    // batches: CUDA caps grid_dim.y at 65535, so large guide sets are launched
+    // over pattern batches with the same atomic out_count (mirrors Myers).
+    uint32_t pattern_block_idx = blockIdx.y * blockDim.y + threadIdx.y + pattern_start;
     // CUDA rounds the grid up to a multiple of the block size, so ignore the
     // trailing threads that would otherwise read past `exec_end`.
     if (exec_idx >= exec_end) return;

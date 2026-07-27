@@ -313,21 +313,39 @@ fn search_device_cuda(
             stream.memcpy_htod(&zero, &mut out_count)?;
 
             let sub_len = sub_end - sub_start;
-            let cfg = launch_cfg_2d(sub_len, n_patterns_u32);
-            let mut launch = stream.launch_builder(&kernel);
-            launch.arg(&genome_buf);
-            launch.arg(&pattern_buf);
-            launch.arg(&max_mismatches);
-            launch.arg(&match_start_min_nucl);
-            launch.arg(&sub_start);
-            launch.arg(&sub_end);
-            launch.arg(&n_patterns_u32);
-            launch.arg(&out_buf);
-            launch.arg(&out_count);
-            unsafe { launch.launch(cfg) }?;
+            // CUDA caps grid_dim.y at 65535, so sweep patterns in batches when
+            // n_patterns exceeds that (large guide sets ⇒ 2×guides patterns).
+            // out_count is the same atomic across batches, so it accumulates
+            // the total candidate count and the overflow/bisection logic below
+            // still holds. Mirrors the Myers path's pattern_start batching.
+            const MAX_GRID_Y: u32 = 65000;
+            let mut total_found: usize = 0;
+            let mut pattern_start: u32 = 0;
+            while pattern_start < n_patterns_u32 {
+                let batch_len = (n_patterns_u32 - pattern_start).min(MAX_GRID_Y);
+                let cfg = launch_cfg_2d(sub_len, batch_len);
+                let mut launch = stream.launch_builder(&kernel);
+                launch.arg(&genome_buf);
+                launch.arg(&pattern_buf);
+                launch.arg(&max_mismatches);
+                launch.arg(&match_start_min_nucl);
+                launch.arg(&sub_start);
+                launch.arg(&sub_end);
+                launch.arg(&n_patterns_u32);
+                launch.arg(&pattern_start);
+                launch.arg(&out_buf);
+                launch.arg(&out_count);
+                unsafe { launch.launch(cfg) }?;
 
-            let count_vec = stream.memcpy_dtov(&out_count)?;
-            let total_found = count_vec[0].max(0) as usize;
+                let count_vec = stream.memcpy_dtov(&out_count)?;
+                total_found = count_vec[0].max(0) as usize;
+
+                // Stop early on overflow; bisection below handles it.
+                if total_found > POPCOUNT_OUT_BUF_SIZE {
+                    break;
+                }
+                pattern_start += batch_len;
+            }
 
             if total_found > POPCOUNT_OUT_BUF_SIZE {
                 let mid = sub_start + (sub_end - sub_start) / 2;
