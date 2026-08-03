@@ -1,6 +1,6 @@
 [package]
 name = "cas_offinder_lib"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pusan.ac.kr>"]
 
