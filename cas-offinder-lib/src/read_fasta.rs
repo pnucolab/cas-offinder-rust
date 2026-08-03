@@ -23,8 +23,8 @@ pub fn read_fasta(dest: &SyncSender<ChromChunkInfo>, fname: &Path) -> Result<(),
             let next_chr_name = String::from_iter(line.chars().skip(1));
             let next_cur = ChromChunkInfo {
                 chr_name: next_chr_name,
-                chunk_start: cur.chunk_end,
-                chunk_end: cur.chunk_end,
+                chunk_start: 0,
+                chunk_end: 0,
                 data: Box::new([0_u8; CHUNK_SIZE_BYTES]),
             };
             if cur.chunk_end != cur.chunk_start {
@@ -56,7 +56,11 @@ pub fn read_fasta(dest: &SyncSender<ChromChunkInfo>, fname: &Path) -> Result<(),
                 return Err(CliError::BadFileFormat("line in fasta too long"));
             }
             let cur_size = cur.size() as usize;
-            string_to_bit4(&mut cur.data[..], line.as_bytes(), cur_size, false);
+            // mixed_base=true: keep genome 'N'/IUPAC chars distinguishable from
+            // bit4=0 padding. N encodes as 0xF, so the Myers DP padding guard
+            // (text_bit4 == 0) still works and the comparison logic can tell
+            // "genome N" apart from "chromosome-boundary / buffer padding".
+            string_to_bit4(&mut cur.data[..], line.as_bytes(), cur_size, true);
             cur.chunk_end += line.len() as u64;
         }
     }

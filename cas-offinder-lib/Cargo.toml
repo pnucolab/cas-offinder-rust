@@ -1,6 +1,6 @@
 [package]
 name = "cas_offinder_lib"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pusan.ac.kr>"]
 
@@ -8,5 +8,6 @@ authors = ["Ben Black <benblack769@gmail.com>", "Jeongbin Park <jeongbin.park@pu
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-opencl3 = "0.9.4" 
+cudarc = { version = "0.19", default-features = false, features = ["driver", "nvrtc", "cuda-12080", "dynamic-loading"] }
 crossbeam-channel = "0.5.8"
+rayon = "1.10"

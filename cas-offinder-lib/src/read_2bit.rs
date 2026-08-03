@@ -11,7 +11,7 @@ use std::sync::mpsc::SyncSender;
 fn read_u32(reader: &mut BufReader<std::fs::File>) -> Result<u32> {
     let mut buf = [0_u8; 4];
     reader.read_exact(&mut buf)?;
-    unsafe { Ok(std::mem::transmute::<[u8; 4], u32>(buf)) }
+    Ok(u32::from_ne_bytes(buf))
 }
 fn read_u8(reader: &mut BufReader<std::fs::File>) -> Result<u8> {
     let mut buf = [0_u8; 1];
@@ -93,9 +93,13 @@ pub fn read_2bit(dest: &SyncSender<ChromChunkInfo>, fname: &Path) -> Result<()> 
                 if block_chunk_start > read_size as i64 {
                     break;
                 }
+                // N-blocks in 2bit files mark genome 'N'. Encode them as
+                // bit4=0xF (all bits set) so the downstream search can tell
+                // genome 'N' apart from chunk-boundary / trailing padding
+                // (bit4=0), matching cas-offinder C++ semantics.
                 memsetbit4(
                     &mut chrdata[..],
-                    0,
+                    0xF,
                     max(0, block_chunk_start) as usize,
                     min(max(0, block_chunk_end) as usize, read_size),
                 );

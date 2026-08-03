@@ -14,3 +14,33 @@ Cargo.lock
 *.out
 _test_data
 opencl3
+/docs/superpowers/
+
+# OpenCL loader symlinks used at build time
+/cas-offinder-cli/libOpenCL.so
+/cas-offinder-lib/libOpenCL.so
+
+# Ad-hoc test inputs and outputs kept at repo root
+/output.txt
+/output_*.txt
+/test_run.in
+/test/*
+/output/*
+
+/GRCh38.primary_assembly.genome.fa
+/GRCh38.primary_assembly.genome.fa.gz
+/GRCh38.primary_assembly.genome_split
+/GRCh38.primary_assembly.genome.fa.fai
+/test_*
+/time_*
+/benchmark/*
+auto_test_crispritz_conda.sh
+
+
+figure.ipynb
+/figure/*
+figure.ipynb.bak
+
+# Large built artifacts — distribute via GitHub Releases, not git
+/Download/*
+cas-database/*
