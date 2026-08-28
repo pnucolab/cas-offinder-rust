@@ -8,6 +8,13 @@ authors = ["So-Hui Kim <sohui511@pusan.ac.kr>", "Ben Black <benblack769@gmail.co
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# The crate is `cas-offinder-cli` to sit beside `cas-offinder-lib`, but the
+# executable people invoke -- and the name the help text already prints in its
+# Usage line -- is `cas-offinder`.
+[[bin]]
+name = "cas-offinder"
+path = "src/main.rs"
+
 [dependencies]
 cas_offinder_lib = { path = "../cas-offinder-lib", version = "1.0.1" }
 itoa = "1"
