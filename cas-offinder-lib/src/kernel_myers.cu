@@ -133,7 +133,12 @@ extern "C" __global__ void find_matches_myers(
     if (j >= j_end) return;
     if (j >= total_nucl) return;
     if (j < active_start_nucl) return;
-    if (j + 1 < PATTERN_LEN) return;
+    // Shortest valid genome span: an RNA bulge consumes a pattern base but no
+    // genome base, so an alignment can be as short as PATTERN_LEN - MAX_RNA_BULGES.
+    // Gating on the full PATTERN_LEN drops those at the start of the scan buffer
+    // before the per-(b_dna, b_rna) span check below can accept them.
+    // Keep in sync with the same guard in search.rs.
+    if (j + 1 < (PATTERN_LEN > MAX_RNA_BULGES ? PATTERN_LEN - MAX_RNA_BULGES : 1)) return;
 
     // ---- PAM pre-check. For PAM-first patterns the genome PAM shifts by
     // b_rna - b_dna, so sweep every (b_dna, b_rna) pair. PAM-last has the
@@ -142,15 +147,27 @@ extern "C" __global__ void find_matches_myers(
     uint32_t db_range = (pam_off == 0) ? (MAX_DNA_BULGES + 1u) : 1u;
     uint32_t rb_range = (pam_off == 0) ? (MAX_RNA_BULGES + 1u) : 1u;
     bool pam_ok = false;
+    // Feasibility uses the SHORTEST span (an RNA bulge drops one genome base),
+    // so alignments that still fit near the buffer start are not pre-rejected.
+    int min_span = (int)PATTERN_LEN - (int)MAX_RNA_BULGES;
+    if (min_span <= 0 || (int)(j + 1) < min_span) return;
     for (uint32_t b_dna = 0; b_dna < db_range && !pam_ok; b_dna++) {
         for (uint32_t b_rna = 0; b_rna < rb_range; b_rna++) {
             int genome_span = (int)PATTERN_LEN + (int)b_dna - (int)b_rna;
             if (genome_span <= 0) continue;
-            if ((int)(j + 1) < genome_span) continue;
-            uint32_t align_start_try = (j + 1) - (uint32_t)genome_span;
+            // PAM-last is anchored to j and unmoved by bulges; PAM-first rides
+            // on the alignment start, which can fall off the buffer.
+            uint32_t pam_g_start;
+            if (pam_off == 0) {
+                int start = (int)(j + 1) - genome_span;
+                if (start < 0) continue;
+                pam_g_start = (uint32_t)start;
+            } else {
+                pam_g_start = (j + 1) - PAM_LEN;
+            }
             bool this_ok = true;
             for (uint32_t k = 0; k < PAM_LEN; k++) {
-                uint32_t gpos = align_start_try + pam_off + k;
+                uint32_t gpos = pam_g_start + k;
                 if (gpos >= total_nucl) { this_ok = false; break; }
                 uint8_t g = get_bit4(genome_bit4, gpos);
                 uint8_t f = pam_filters_bit4[p * PAM_LEN + k];

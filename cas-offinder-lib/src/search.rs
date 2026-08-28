@@ -780,16 +780,35 @@ fn check_pam_quick(
     } else {
         (1i64, 1i64)
     };
+    let pam_len = pam_filter.len();
+    // Feasibility is decided by the SHORTEST span this pattern can occupy: an
+    // RNA bulge drops one genome base, so an alignment can still fit near the
+    // start of the scan buffer when `pattern_len` on its own would not.
+    let min_span = pattern_len as i64 - max_rna_bulges as i64;
+    if min_span <= 0 || min_span > (end_pos as i64 + 1) {
+        return false;
+    }
     for b_dna in 0..db_range {
         for b_rna in 0..rb_range {
             let genome_span = pattern_len as i64 + b_dna - b_rna;
-            if genome_span <= 0 || genome_span > (end_pos as i64 + 1) {
+            if genome_span <= 0 {
                 continue;
             }
-            let align_start = (end_pos + 1) - genome_span as usize;
+            // PAM-last sits on the last `pam_len` genome bases of the alignment,
+            // anchored to `end_pos` and unmoved by bulges. PAM-first rides on the
+            // alignment start, which does move -- and may fall off the buffer.
+            let pam_g_start = if pam_offset == 0 {
+                let start = end_pos as i64 + 1 - genome_span;
+                if start < 0 {
+                    continue;
+                }
+                start as usize
+            } else {
+                (end_pos + 1) - pam_len
+            };
             let mut ok = true;
             for (k, &f) in pam_filter.iter().enumerate() {
-                let gpos = align_start + pam_offset + k;
+                let gpos = pam_g_start + k;
                 if gpos >= total_nucl {
                     ok = false;
                     break;
@@ -879,8 +898,17 @@ fn search_chunk_myers(
     for (p_idx, peq) in peqs.iter().enumerate() {
         let (pam_offset, ref pam_filter) = pam_precheck[p_idx];
 
+        // Minimum genome span this pattern can occupy: an RNA bulge consumes a
+        // pattern base without consuming a genome base, so the shortest valid
+        // alignment is `pattern_len - max_rna_bulges` long. Gating on the full
+        // `pattern_len` here would drop those short alignments outright at the
+        // very start of the scan buffer, before `check_pam_quick` -- which
+        // already rejects spans that do not fit -- ever runs. Keep this in sync
+        // with the same guard in kernel_myers.cu.
+        let min_genome_span = pattern_len.saturating_sub(max_rna_bulges as usize);
+
         for t_pos in active_start_nucl..total_nucl {
-            if t_pos + 1 < pattern_len {
+            if t_pos + 1 < min_genome_span {
                 continue;
             }
 
