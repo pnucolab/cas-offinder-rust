@@ -81,21 +81,6 @@ fn main() {
     let pattern_len_clone = run_info.pattern_len;
     let max_mismatches_clone = run_info.max_mismatches;
     let use_myers = run_info.max_dna_bulges > 0 || run_info.max_rna_bulges > 0;
-    // PAM length = positions where the user's crRNA patterns hold N placeholders
-    // (PAM is always at the end in the original crRNA orientation). Counted from
-    // trailing N's of the first pattern; all patterns are padded identically.
-    let pam_len_clone: u64 = {
-        let first = &run_info.patterns[0];
-        let mut count = 0u64;
-        for &c in first.iter().rev() {
-            if c == b'N' || c == b'n' {
-                count += 1;
-            } else {
-                break;
-            }
-        }
-        count
-    };
     let log_out_path = run_info.out_path.clone();
     let log_genome_path = run_info.genome_path.clone();
     let log_n_patterns = run_info.patterns.len();
@@ -256,17 +241,15 @@ fn main() {
                     dna_bytes = &marked_dna_buf;
                 }
 
-                // Match original cas-offinder position convention:
-                //   + strand: leftmost + strand coord (= Rust internal)
-                //   - strand: shifted by (PAM_len - 1 - dna_bulge_size)
-                let pos_out = if m.is_forward {
-                    m.chrom_idx
-                } else {
-                    m.chrom_idx
-                        + pam_len_clone
-                            .saturating_sub(1)
-                            .saturating_sub(m.dna_bulge_size as u64)
-                };
+                // cas-offinder reports the leftmost 0-based coordinate of the
+                // match on the + strand, for both strands -- `m.chrom_idx` is
+                // already that, so a - strand hit needs no adjustment. An
+                // earlier `+ (pam_len - 1 - dna_bulge_size)` shift here was
+                // meant to reproduce the C++ convention but moved - strand
+                // coordinates off the sequence they report: looking the
+                // position up in the genome and reverse-complementing it no
+                // longer reproduced the DNA column.
+                let pos_out = m.chrom_idx;
 
                 // Map back from the internal pattern index (forward + RC
                 // copies stored consecutively) to the user-supplied guide
